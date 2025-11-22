@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# NightShift data (user data should not be in repo)
+.nightshift/
+
+# MCP session data
+.mcp_*/
+
+# Test outputs and temporary files
+*.pdf
+*.log
+output/
+logs/
+database/
+notifications/
+
+# Documentation artifacts
+nightshift-ideas.pdf
+arxiv_*.md
+claude-example-call.txt
+claude-options.txt

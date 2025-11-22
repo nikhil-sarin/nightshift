@@ -1,0 +1,309 @@
+"""
+NightShift CLI Interface
+Provides commands for task submission, approval, and monitoring
+"""
+import click
+import uuid
+from pathlib import Path
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.syntax import Syntax
+import json
+
+from ..core.task_queue import TaskQueue, TaskStatus
+from ..core.task_planner import TaskPlanner
+from ..core.agent_manager import AgentManager
+from ..core.logger import NightShiftLogger
+from ..core.config import Config
+
+
+# Initialize rich console for pretty output
+console = Console()
+
+
+@click.group()
+@click.pass_context
+def cli(ctx):
+    """NightShift - Automated Research Assistant System"""
+    # Initialize core components
+    ctx.ensure_object(dict)
+
+    # Load configuration
+    config = Config()
+    ctx.obj['config'] = config
+
+    # Initialize components with config paths
+    ctx.obj['logger'] = NightShiftLogger(log_dir=str(config.get_log_dir()))
+    ctx.obj['task_queue'] = TaskQueue(db_path=str(config.get_database_path()))
+    ctx.obj['task_planner'] = TaskPlanner(
+        ctx.obj['logger'],
+        tools_reference_path=str(config.get_tools_reference_path())
+    )
+    ctx.obj['agent_manager'] = AgentManager(
+        ctx.obj['task_queue'],
+        ctx.obj['logger'],
+        output_dir=str(config.get_output_dir())
+    )
+
+
+@cli.command()
+@click.argument('description')
+@click.option('--auto-approve', is_flag=True, help='Skip approval and execute immediately')
+@click.pass_context
+def submit(ctx, description, auto_approve):
+    """Submit a new task"""
+    logger = ctx.obj['logger']
+    task_queue = ctx.obj['task_queue']
+    task_planner = ctx.obj['task_planner']
+    agent_manager = ctx.obj['agent_manager']
+
+    console.print(f"\n[bold blue]Planning task...[/bold blue]")
+
+    try:
+        # Use Claude to plan the task
+        plan = task_planner.plan_task(description)
+
+        # Generate unique task ID
+        task_id = f"task_{uuid.uuid4().hex[:8]}"
+
+        # Create task in STAGED state
+        task = task_queue.create_task(
+            task_id=task_id,
+            description=plan['enhanced_prompt'],
+            allowed_tools=plan['allowed_tools'],
+            system_prompt=plan['system_prompt'],
+            estimated_tokens=plan['estimated_tokens'],
+            estimated_time=plan['estimated_time']
+        )
+
+        logger.log_task_created(task_id, description)
+
+        # Display plan
+        console.print(f"\n[bold green]✓ Task created:[/bold green] {task_id}")
+
+        panel = Panel.fit(
+            f"[yellow]Original:[/yellow] {description}\n\n"
+            f"[yellow]Enhanced prompt:[/yellow] {plan['enhanced_prompt']}\n\n"
+            f"[yellow]Tools needed:[/yellow] {', '.join(plan['allowed_tools'])}\n\n"
+            f"[yellow]Estimated:[/yellow] ~{plan['estimated_tokens']} tokens, ~{plan['estimated_time']}s\n\n"
+            f"[yellow]Reasoning:[/yellow] {plan.get('reasoning', 'N/A')}",
+            title=f"Task Plan: {task_id}",
+            border_style="blue"
+        )
+        console.print(panel)
+
+        if auto_approve:
+            console.print(f"\n[bold yellow]Auto-approving and executing...[/bold yellow]")
+            task_queue.update_status(task_id, TaskStatus.COMMITTED)
+            logger.log_task_approved(task_id)
+
+            console.print(f"\n[bold blue]▶ Executing task...[/bold blue]\n")
+            result = agent_manager.execute_task(task)
+
+            if result['success']:
+                console.print(f"\n[bold green]✓ Task completed successfully![/bold green]")
+                console.print(f"Token usage: {result.get('token_usage', 'N/A')}")
+                console.print(f"Execution time: {result['execution_time']:.1f}s")
+                console.print(f"Results saved to: {result.get('result_path', 'N/A')}")
+            else:
+                console.print(f"\n[bold red]✗ Task failed:[/bold red] {result.get('error')}")
+        else:
+            console.print(f"\n[dim]⏸  Status:[/dim] STAGED (waiting for approval)")
+            console.print(f"[dim]Run 'nightshift approve {task_id}' to execute[/dim]\n")
+
+    except Exception as e:
+        console.print(f"\n[bold red]Error:[/bold red] {str(e)}\n")
+        logger.error(f"Task submission failed: {str(e)}")
+        raise click.Abort()
+
+
+@cli.command()
+@click.option('--status', type=click.Choice(['staged', 'committed', 'running', 'completed', 'failed', 'cancelled']),
+              help='Filter by status')
+@click.pass_context
+def queue(ctx, status):
+    """View task queue"""
+    task_queue = ctx.obj['task_queue']
+
+    # Get tasks
+    if status:
+        tasks = task_queue.list_tasks(TaskStatus(status))
+        title = f"Tasks ({status.upper()})"
+    else:
+        tasks = task_queue.list_tasks()
+        title = "All Tasks"
+
+    if not tasks:
+        console.print(f"\n[dim]No tasks found[/dim]\n")
+        return
+
+    # Create table
+    table = Table(title=title, show_header=True, header_style="bold magenta")
+    table.add_column("ID", style="cyan")
+    table.add_column("Status", style="yellow")
+    table.add_column("Description", style="white")
+    table.add_column("Est. Time", justify="right")
+    table.add_column("Created", style="dim")
+
+    for task in tasks:
+        # Color code status
+        status_color = {
+            "staged": "yellow",
+            "committed": "blue",
+            "running": "cyan",
+            "completed": "green",
+            "failed": "red",
+            "cancelled": "dim"
+        }.get(task.status, "white")
+
+        table.add_row(
+            task.task_id,
+            f"[{status_color}]{task.status.upper()}[/{status_color}]",
+            task.description[:60] + "..." if len(task.description) > 60 else task.description,
+            f"{task.estimated_time}s" if task.estimated_time else "N/A",
+            task.created_at.split('T')[0] if task.created_at else "N/A"
+        )
+
+    console.print("\n")
+    console.print(table)
+    console.print("\n")
+
+
+@cli.command()
+@click.argument('task_id')
+@click.pass_context
+def approve(ctx, task_id):
+    """Approve and execute a staged task"""
+    logger = ctx.obj['logger']
+    task_queue = ctx.obj['task_queue']
+    agent_manager = ctx.obj['agent_manager']
+
+    # Get task
+    task = task_queue.get_task(task_id)
+    if not task:
+        console.print(f"\n[bold red]Error:[/bold red] Task {task_id} not found\n")
+        raise click.Abort()
+
+    if task.status != TaskStatus.STAGED.value:
+        console.print(f"\n[bold red]Error:[/bold red] Task {task_id} is not in STAGED state (current: {task.status})\n")
+        raise click.Abort()
+
+    # Update to COMMITTED and execute
+    task_queue.update_status(task_id, TaskStatus.COMMITTED)
+    logger.log_task_approved(task_id)
+
+    console.print(f"\n[bold green]✓ Task approved:[/bold green] {task_id}")
+    console.print(f"\n[bold blue]▶ Executing...[/bold blue]\n")
+
+    result = agent_manager.execute_task(task)
+
+    if result['success']:
+        console.print(f"\n[bold green]✓ Task completed successfully![/bold green]")
+        console.print(f"Token usage: {result.get('token_usage', 'N/A')}")
+        console.print(f"Execution time: {result['execution_time']:.1f}s")
+        console.print(f"Results saved to: {result.get('result_path', 'N/A')}\n")
+    else:
+        console.print(f"\n[bold red]✗ Task failed:[/bold red] {result.get('error')}\n")
+
+
+@cli.command()
+@click.argument('task_id')
+@click.option('--show-output', is_flag=True, help='Display full output')
+@click.pass_context
+def results(ctx, task_id, show_output):
+    """View task results"""
+    task_queue = ctx.obj['task_queue']
+
+    # Get task
+    task = task_queue.get_task(task_id)
+    if not task:
+        console.print(f"\n[bold red]Error:[/bold red] Task {task_id} not found\n")
+        raise click.Abort()
+
+    # Display task info
+    console.print(f"\n[bold cyan]Task:[/bold cyan] {task_id}")
+    console.print(f"[yellow]Status:[/yellow] {task.status.upper()}")
+    console.print(f"[yellow]Description:[/yellow] {task.description}")
+    console.print(f"[yellow]Created:[/yellow] {task.created_at}")
+
+    if task.started_at:
+        console.print(f"[yellow]Started:[/yellow] {task.started_at}")
+    if task.completed_at:
+        console.print(f"[yellow]Completed:[/yellow] {task.completed_at}")
+    if task.token_usage:
+        console.print(f"[yellow]Token Usage:[/yellow] {task.token_usage}")
+    if task.execution_time:
+        console.print(f"[yellow]Execution Time:[/yellow] {task.execution_time:.1f}s")
+
+    if task.error_message:
+        console.print(f"\n[bold red]Error:[/bold red] {task.error_message}")
+
+    if task.result_path and show_output:
+        console.print(f"\n[bold]Output:[/bold]")
+        try:
+            with open(task.result_path) as f:
+                data = json.load(f)
+                syntax = Syntax(json.dumps(data, indent=2), "json", theme="monokai")
+                console.print(syntax)
+        except Exception as e:
+            console.print(f"[red]Failed to read output: {e}[/red]")
+
+    console.print()
+
+
+@cli.command()
+@click.argument('task_id')
+@click.pass_context
+def cancel(ctx, task_id):
+    """Cancel a staged task"""
+    task_queue = ctx.obj['task_queue']
+
+    task = task_queue.get_task(task_id)
+    if not task:
+        console.print(f"\n[bold red]Error:[/bold red] Task {task_id} not found\n")
+        raise click.Abort()
+
+    if task.status not in [TaskStatus.STAGED.value, TaskStatus.COMMITTED.value]:
+        console.print(f"\n[bold red]Error:[/bold red] Cannot cancel task in {task.status} state\n")
+        raise click.Abort()
+
+    task_queue.update_status(task_id, TaskStatus.CANCELLED)
+    console.print(f"\n[bold yellow]✓ Task cancelled:[/bold yellow] {task_id}\n")
+
+
+@cli.command()
+@click.option('--confirm', is_flag=True, help='Skip confirmation prompt')
+@click.pass_context
+def clear(ctx, confirm):
+    """Clear all NightShift data (database, logs, outputs)"""
+    config = ctx.obj['config']
+
+    if not confirm:
+        console.print(f"\n[bold yellow]⚠️  Warning:[/bold yellow] This will delete all NightShift data:")
+        console.print(f"  • Database: {config.get_database_path()}")
+        console.print(f"  • Logs: {config.get_log_dir()}")
+        console.print(f"  • Outputs: {config.get_output_dir()}")
+        console.print(f"  • Notifications: {config.get_notifications_dir()}")
+
+        response = click.confirm("\nAre you sure you want to continue?", default=False)
+        if not response:
+            console.print("\n[dim]Cancelled[/dim]\n")
+            return
+
+    # Remove the entire base directory
+    import shutil
+    if config.base_dir.exists():
+        shutil.rmtree(config.base_dir)
+        console.print(f"\n[bold green]✓ Cleared all NightShift data[/bold green]\n")
+    else:
+        console.print(f"\n[dim]Nothing to clear[/dim]\n")
+
+
+def main():
+    """Entry point"""
+    cli(obj={})
+
+
+if __name__ == '__main__':
+    main()
