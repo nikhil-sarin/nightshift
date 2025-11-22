@@ -38,9 +38,13 @@ class TaskPlanner:
             self.logger.warning(f"Tools reference not found at {self.tools_reference_path}")
             self.tools_reference = ""
 
-    def plan_task(self, description: str) -> Dict[str, Any]:
+    def plan_task(self, description: str, timeout: int = 120) -> Dict[str, Any]:
         """
         Use Claude to analyze task and create execution plan
+
+        Args:
+            description: The user's task description
+            timeout: Timeout in seconds for the planning subprocess (default: 120)
 
         Returns:
             Dict with keys:
@@ -112,7 +116,7 @@ Guidelines:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=timeout
             )
 
             if result.returncode != 0:

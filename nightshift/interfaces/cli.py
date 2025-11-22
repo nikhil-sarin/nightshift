@@ -50,8 +50,9 @@ def cli(ctx):
 @cli.command()
 @click.argument('description')
 @click.option('--auto-approve', is_flag=True, help='Skip approval and execute immediately')
+@click.option('--planning-timeout', default=120, type=int, help='Timeout in seconds for task planning (default: 120)')
 @click.pass_context
-def submit(ctx, description, auto_approve):
+def submit(ctx, description, auto_approve, planning_timeout):
     """Submit a new task"""
     logger = ctx.obj['logger']
     task_queue = ctx.obj['task_queue']
@@ -62,7 +63,7 @@ def submit(ctx, description, auto_approve):
 
     try:
         # Use Claude to plan the task
-        plan = task_planner.plan_task(description)
+        plan = task_planner.plan_task(description, timeout=planning_timeout)
 
         # Generate unique task ID
         task_id = f"task_{uuid.uuid4().hex[:8]}"
