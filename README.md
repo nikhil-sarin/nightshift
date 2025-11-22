@@ -78,25 +78,64 @@ All NightShift data is stored in `~/.nightshift/`:
 
 ## Features
 
+<table>
+<tr>
+<td width="50%">
+
 ### ✅ Implemented (MVP)
-- **Intelligent Task Planning**: Claude analyzes requests and selects appropriate MCP tools
-- **Staged Approval Workflow**: Review tasks before execution (prevents hallucinations)
-- **Plan Revision**: Request changes to task plans with feedback before execution
-- **MCP Tool Integration**: Leverages ArXiv, Gemini, and other MCP servers
-- **File Change Tracking**: Monitors which files were created/modified during execution
-- **Rich Notifications**: Detailed completion summaries with file changes
-- **CLI Interface**: Simple commands for task management
-- **Persistent Storage**: SQLite database, centralized data directory
-- **Token & Time Tracking**: Monitors resource usage per task
+
+- 🧠 **Intelligent Task Planning**
+  Claude analyzes requests and selects appropriate MCP tools
+
+- 🔒 **Staged Approval Workflow**
+  Review tasks before execution (prevents hallucinations)
+
+- ✏️ **Plan Revision**
+  Request changes to task plans with feedback before execution
+
+- 🔧 **MCP Tool Integration**
+  Leverages ArXiv, Gemini, and other MCP servers
+
+- 📁 **File Change Tracking**
+  Monitors which files were created/modified during execution
+
+- 🔔 **Rich Notifications**
+  Detailed completion summaries with file changes
+
+- 💻 **CLI Interface**
+  Simple commands for task management
+
+- 💾 **Persistent Storage**
+  SQLite database, centralized data directory
+
+- 📊 **Token & Time Tracking**
+  Monitors resource usage per task
+
+</td>
+<td width="50%">
 
 ### 🚧 Planned (Future)
-- Slack/WhatsApp integration for notifications
-- Asynchronous task execution (background processing)
-- Multi-user support
-- Resource limits and auto-kill for runaway tasks
-- RAG-based context awareness (documentation search)
-- Knowledge base for correcting errors
-- More task types: data analysis, code maintenance, environment setup
+
+- 📱 Slack/WhatsApp integration for notifications
+
+- ⚡ Asynchronous task execution (background processing)
+
+- 👥 Multi-user support
+
+- 🛡️ Resource limits and auto-kill for runaway tasks
+
+- 🔍 RAG-based context awareness (documentation search)
+
+- 📚 Knowledge base for correcting errors
+
+- 🎯 More task types:
+  - Data analysis
+  - Code maintenance
+  - Environment setup
+
+</td>
+</tr>
+</table>
 
 ## Installation
 
@@ -107,7 +146,11 @@ pip install -e .
 
 ## Usage
 
-### Submit a task
+### Quick Start
+
+<details>
+<summary><b>📝 Submit a task</b></summary>
+
 ```bash
 # Submit and wait for approval
 nightshift submit "Download and summarize arxiv paper 2510.13997 using Gemini"
@@ -115,8 +158,11 @@ nightshift submit "Download and summarize arxiv paper 2510.13997 using Gemini"
 # Auto-approve and execute immediately
 nightshift submit "Download arxiv paper 2510.13997" --auto-approve
 ```
+</details>
 
-### View task queue
+<details>
+<summary><b>📋 View task queue</b></summary>
+
 ```bash
 # View all tasks
 nightshift queue
@@ -125,13 +171,19 @@ nightshift queue
 nightshift queue --status staged
 nightshift queue --status completed
 ```
+</details>
 
-### Approve and execute
+<details>
+<summary><b>✅ Approve and execute</b></summary>
+
 ```bash
 nightshift approve task_3acf60c6
 ```
+</details>
 
-### Revise a plan
+<details>
+<summary><b>✏️ Revise a plan</b></summary>
+
 ```bash
 # Request changes to a staged task plan
 nightshift revise task_3acf60c6 "Use Claude instead of Gemini for summarization"
@@ -139,8 +191,11 @@ nightshift revise task_3acf60c6 "Use Claude instead of Gemini for summarization"
 # Revise again with more feedback
 nightshift revise task_3acf60c6 "Also save the summary as a PDF file"
 ```
+</details>
 
-### View results
+<details>
+<summary><b>📊 View results</b></summary>
+
 ```bash
 # Basic info
 nightshift results task_3acf60c6
@@ -148,13 +203,19 @@ nightshift results task_3acf60c6
 # Show full output
 nightshift results task_3acf60c6 --show-output
 ```
+</details>
 
-### Cancel a task
+<details>
+<summary><b>❌ Cancel a task</b></summary>
+
 ```bash
 nightshift cancel task_3acf60c6
 ```
+</details>
 
-### Clear all data
+<details>
+<summary><b>🗑️ Clear all data</b></summary>
+
 ```bash
 # With confirmation
 nightshift clear
@@ -162,6 +223,7 @@ nightshift clear
 # Skip confirmation
 nightshift clear --confirm
 ```
+</details>
 
 ## Example Workflows
 
