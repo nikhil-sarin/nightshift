@@ -295,7 +295,10 @@ Guidelines:
             wrapper = json.loads(result.stdout)
 
             # Extract the actual result from the wrapper
-            if "result" in wrapper:
+            # Check for structured_output first (new --json-schema format)
+            if "structured_output" in wrapper:
+                refined_plan = wrapper["structured_output"]
+            elif "result" in wrapper and wrapper["result"]:
                 result_text = wrapper["result"]
 
                 # Remove markdown code fences if present
@@ -309,6 +312,7 @@ Guidelines:
                 result_text = result_text.strip()
                 refined_plan = json.loads(result_text)
             else:
+                # If no wrapper, try parsing directly
                 refined_plan = wrapper
 
             # Validate required fields
