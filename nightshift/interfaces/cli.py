@@ -332,6 +332,7 @@ def revise(ctx, task_id, feedback):
         current_plan = {
             'enhanced_prompt': task.description,
             'allowed_tools': task.allowed_tools or [],
+            'allowed_directories': task.allowed_directories or [],
             'system_prompt': task.system_prompt or '',
             'estimated_tokens': task.estimated_tokens or 0,
             'estimated_time': task.estimated_time or 0
@@ -345,6 +346,7 @@ def revise(ctx, task_id, feedback):
             task_id=task_id,
             description=revised_plan['enhanced_prompt'],
             allowed_tools=revised_plan['allowed_tools'],
+            allowed_directories=revised_plan['allowed_directories'],
             system_prompt=revised_plan['system_prompt'],
             estimated_tokens=revised_plan['estimated_tokens'],
             estimated_time=revised_plan['estimated_time']
@@ -359,9 +361,13 @@ def revise(ctx, task_id, feedback):
         # Display revised plan
         console.print(f"\n[bold green]✓ Plan revised:[/bold green] {task_id}")
 
+        # Format directories display
+        dirs_display = "\n".join(f"  • {d}" for d in revised_plan.get('allowed_directories', [])) if revised_plan.get('allowed_directories') else "  (none)"
+
         panel = Panel.fit(
             f"[yellow]Revised prompt:[/yellow] {revised_plan['enhanced_prompt']}\n\n"
             f"[yellow]Tools needed:[/yellow] {', '.join(revised_plan['allowed_tools'])}\n\n"
+            f"[yellow]Sandbox (write access):[/yellow]\n{dirs_display}\n\n"
             f"[yellow]Estimated:[/yellow] ~{revised_plan['estimated_tokens']} tokens, ~{revised_plan['estimated_time']}s\n\n"
             f"[yellow]Changes:[/yellow] {revised_plan.get('reasoning', 'N/A')}",
             title=f"Revised Plan: {task_id}",
