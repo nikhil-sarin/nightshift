@@ -47,12 +47,13 @@ class SandboxManager:
                 logger.warning(f"Allowed directory does not exist: {path}")
             resolved_dirs.append(str(path))
 
-        # Always allow temp directories
+        # Always allow temp directories and Claude's config/debug directories
         temp_dirs = [
             "/tmp",
             "/private/tmp",
             "/private/var/tmp",
-            str(Path(tempfile.gettempdir()).resolve())
+            str(Path(tempfile.gettempdir()).resolve()),
+            str(Path.home() / ".claude")  # Claude CLI needs to write debug logs
         ]
 
         # Combine and deduplicate
