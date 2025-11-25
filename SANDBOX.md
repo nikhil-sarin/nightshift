@@ -205,6 +205,41 @@ agent_manager = AgentManager(
 
 **Solution:** This should not happen in normal operation. If it does, restart the task. Check that `/tmp` is writable.
 
+### GitHub CLI (gh) Authentication Fails in Sandbox
+
+**Symptom:** `gh` commands report "invalid token" or authentication errors, even though `gh auth status` works outside the sandbox.
+
+**Cause:** macOS sandbox blocks access to the Keychain where gh stores authentication tokens.
+
+**Solutions:**
+
+Option 1: Use a token file (recommended):
+```bash
+# Get your current token
+gh auth token
+
+# Create a token file in gh config
+echo "your_token_here" > ~/.config/gh/token.txt
+
+# Configure gh to use the token file
+export GH_TOKEN=$(cat ~/.config/gh/token.txt)
+```
+
+Option 2: Store token in hosts.yml instead of keychain:
+```bash
+# Log out and re-authenticate with file-based storage
+gh auth logout
+gh auth login --with-token < ~/.config/gh/token.txt
+```
+
+Option 3: Use the `GH_TOKEN` environment variable (for specific tasks):
+```bash
+export GH_TOKEN="your_token_here"
+nightshift submit "create a gh issue..." --auto-approve
+```
+
+The sandbox already allows read/write access to `~/.config/gh/` when `needs_git=true`, so file-based token storage will work.
+
 ### Task Works Without Sandbox but Fails With Sandbox
 
 **Symptom:** Task succeeds when sandboxing is disabled but fails when enabled.
