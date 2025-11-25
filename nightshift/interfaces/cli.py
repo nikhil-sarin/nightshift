@@ -606,16 +606,48 @@ def watch(ctx, task_id, follow):
                             continue
                         try:
                             event = json.loads(line)
-                            if event.get('type') == 'text':
+                            event_type = event.get('type')
+
+                            # Handle assistant messages with content
+                            if event_type == 'assistant' and 'message' in event:
+                                msg = event['message']
+                                if 'content' in msg:
+                                    for content_block in msg['content']:
+                                        if content_block.get('type') == 'text':
+                                            console.print(f"[white]{content_block.get('text', '')}[/white]")
+                                        elif content_block.get('type') == 'tool_use':
+                                            console.print(f"[cyan]🔧 Tool: {content_block.get('name')}[/cyan]")
+
+                            # Handle direct text blocks
+                            elif event_type == 'text':
                                 console.print(f"[white]{event.get('text', '')}[/white]", end='')
-                            elif event.get('type') == 'tool_use':
+
+                            # Handle tool use
+                            elif event_type == 'tool_use':
                                 console.print(f"\n[cyan]🔧 Tool: {event.get('name')}[/cyan]")
-                            elif 'usage' in event:
+
+                            # Handle result messages
+                            elif event_type == 'result':
+                                if event.get('subtype') == 'success':
+                                    console.print(f"\n[green]✓ Success[/green]")
+                                result_text = event.get('result', '')
+                                if result_text and len(result_text) < 200:
+                                    console.print(f"[dim]{result_text}[/dim]")
+
+                            # Show token usage from any message
+                            if 'usage' in event:
                                 usage = event['usage']
-                                console.print(f"\n[dim]📊 Tokens: {usage.get('input_tokens', 0)} in, {usage.get('output_tokens', 0)} out[/dim]")
+                                console.print(f"[dim]📊 Tokens: {usage.get('input_tokens', 0)} in, {usage.get('output_tokens', 0)} out[/dim]")
+                            elif event_type == 'assistant' and 'message' in event and 'usage' in event['message']:
+                                usage = event['message']['usage']
+                                total_tokens = usage.get('input_tokens', 0) + usage.get('output_tokens', 0)
+                                if total_tokens > 0:  # Only show if there are actual tokens
+                                    console.print(f"[dim]📊 Tokens: {usage.get('input_tokens', 0)} in, {usage.get('output_tokens', 0)} out[/dim]")
+
                         except json.JSONDecodeError:
-                            # Plain text line
-                            console.print(f"[dim]{line[:100]}[/dim]")
+                            # Plain text line - show first 100 chars
+                            if line.strip():
+                                console.print(f"[dim]{line[:100]}[/dim]")
 
                     if len(lines) > 50:
                         remaining = len(lines) - 50
