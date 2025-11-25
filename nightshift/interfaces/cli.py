@@ -131,10 +131,14 @@ def submit(ctx, description, auto_approve, planning_timeout, allow_dir, debug):
                     cmd_parts.append(f"--allowed-tools {' '.join(task.allowed_tools)}")
                 claude_cmd = " ".join(cmd_parts)
 
-                if agent_manager.sandbox and task.allowed_directories:
-                    # Show sandbox profile
+                if agent_manager.sandbox:
+                    # Show sandbox profile (all tasks are sandboxed when sandbox is enabled)
                     temp_sandbox = SandboxManager()
-                    profile_path = temp_sandbox.create_profile(task.allowed_directories, f"{task_id}_debug")
+                    profile_path = temp_sandbox.create_profile(
+                        task.allowed_directories or [],  # Empty list for read-only tasks
+                        f"{task_id}_debug",
+                        needs_git=bool(task.needs_git)
+                    )
 
                     console.print("\n[bold cyan]🔍 Debug Information[/bold cyan]")
                     console.print(f"[dim]Sandbox profile: {profile_path}[/dim]\n")
