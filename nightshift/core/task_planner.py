@@ -79,6 +79,7 @@ Respond with ONLY a JSON object (no other text) with this structure:
     "enhanced_prompt": "The full detailed prompt for the executor agent",
     "allowed_tools": ["tool1", "tool2", ...],
     "allowed_directories": ["/absolute/path/to/dir1", "/absolute/path/to/dir2"],
+    "needs_git": false,
     "system_prompt": "System prompt for the executor",
     "estimated_tokens": 1000,
     "estimated_time": 60,
@@ -91,6 +92,7 @@ Guidelines:
 - For arxiv tasks, include mcp__arxiv__download and either mcp__gemini__ask or mcp__claude__ask for summarization
 - Estimated time: simple tasks 30s, paper analysis 60s, data analysis 120s
 - Estimated tokens: add ~2000 for paper tasks, ~1000 for data tasks, ~500 base
+- Set needs_git to true if the task involves git operations (commit, push, branch, etc.)
 
 **SECURITY - Directory Sandboxing (CRITICAL):**
 - The executor will run in a macOS sandbox that BLOCKS all filesystem writes except to allowed_directories
@@ -115,12 +117,13 @@ Guidelines:
                     "enhanced_prompt": {"type": "string"},
                     "allowed_tools": {"type": "array", "items": {"type": "string"}},
                     "allowed_directories": {"type": "array", "items": {"type": "string"}},
+                    "needs_git": {"type": "boolean"},
                     "system_prompt": {"type": "string"},
                     "estimated_tokens": {"type": "integer"},
                     "estimated_time": {"type": "integer"},
                     "reasoning": {"type": "string"}
                 },
-                "required": ["enhanced_prompt", "allowed_tools", "allowed_directories", "system_prompt", "estimated_tokens", "estimated_time"]
+                "required": ["enhanced_prompt", "allowed_tools", "allowed_directories", "needs_git", "system_prompt", "estimated_tokens", "estimated_time"]
             })
 
             cmd = [
@@ -177,7 +180,7 @@ Guidelines:
 
             # Validate required fields
             required_fields = ["enhanced_prompt", "allowed_tools", "allowed_directories",
-                             "system_prompt", "estimated_tokens", "estimated_time"]
+                             "needs_git", "system_prompt", "estimated_tokens", "estimated_time"]
             for field in required_fields:
                 if field not in plan:
                     raise Exception(f"Planning response missing field: {field}")
@@ -239,6 +242,7 @@ Based on the user's feedback, create a REVISED plan. Respond with ONLY a JSON ob
     "enhanced_prompt": "The revised detailed prompt for the executor agent",
     "allowed_tools": ["tool1", "tool2", ...],
     "allowed_directories": ["/absolute/path/to/dir1", "/absolute/path/to/dir2"],
+    "needs_git": false,
     "system_prompt": "Revised system prompt for the executor",
     "estimated_tokens": 1000,
     "estimated_time": 60,
@@ -262,12 +266,13 @@ Guidelines:
                     "enhanced_prompt": {"type": "string"},
                     "allowed_tools": {"type": "array", "items": {"type": "string"}},
                     "allowed_directories": {"type": "array", "items": {"type": "string"}},
+                    "needs_git": {"type": "boolean"},
                     "system_prompt": {"type": "string"},
                     "estimated_tokens": {"type": "integer"},
                     "estimated_time": {"type": "integer"},
                     "reasoning": {"type": "string"}
                 },
-                "required": ["enhanced_prompt", "allowed_tools", "allowed_directories", "system_prompt",
+                "required": ["enhanced_prompt", "allowed_tools", "allowed_directories", "needs_git", "system_prompt",
                              "estimated_tokens", "estimated_time"]
             })
 
@@ -317,7 +322,7 @@ Guidelines:
 
             # Validate required fields
             required_fields = ["enhanced_prompt", "allowed_tools", "allowed_directories",
-                             "system_prompt", "estimated_tokens", "estimated_time"]
+                             "needs_git", "system_prompt", "estimated_tokens", "estimated_time"]
             for field in required_fields:
                 if field not in refined_plan:
                     raise Exception(f"Refined plan missing field: {field}")

@@ -85,6 +85,7 @@ def submit(ctx, description, auto_approve, planning_timeout, allow_dir, debug):
             description=plan['enhanced_prompt'],
             allowed_tools=plan['allowed_tools'],
             allowed_directories=allowed_directories,
+            needs_git=plan.get('needs_git', False),
             system_prompt=plan['system_prompt'],
             estimated_tokens=plan['estimated_tokens'],
             estimated_time=plan['estimated_time']
@@ -98,11 +99,14 @@ def submit(ctx, description, auto_approve, planning_timeout, allow_dir, debug):
         # Format directories display
         dirs_display = "\n".join(f"  • {d}" for d in allowed_directories) if allowed_directories else "  (none)"
 
+        # Add git status if enabled
+        git_status = " + git support (device files)" if plan.get('needs_git', False) else ""
+
         panel = Panel.fit(
             f"[yellow]Original:[/yellow] {description}\n\n"
             f"[yellow]Enhanced prompt:[/yellow] {plan['enhanced_prompt']}\n\n"
             f"[yellow]Tools needed:[/yellow] {', '.join(plan['allowed_tools'])}\n\n"
-            f"[yellow]Sandbox (write access):[/yellow]\n{dirs_display}\n\n"
+            f"[yellow]Sandbox (write access):[/yellow]\n{dirs_display}{git_status}\n\n"
             f"[yellow]Estimated:[/yellow] ~{plan['estimated_tokens']} tokens, ~{plan['estimated_time']}s\n\n"
             f"[yellow]Reasoning:[/yellow] {plan.get('reasoning', 'N/A')}",
             title=f"Task Plan: {task_id}",

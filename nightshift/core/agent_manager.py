@@ -272,10 +272,13 @@ class AgentManager:
                 # Validate directories before sandboxing
                 validated_dirs = SandboxManager.validate_directories(task.allowed_directories)
                 self.logger.info(f"Sandboxing task with allowed directories: {validated_dirs}")
+                if task.needs_git:
+                    self.logger.info("Git operations enabled - allowing device file access")
                 return self.sandbox.wrap_command(
                     claude_cmd,
                     validated_dirs,
-                    profile_name=task.task_id
+                    profile_name=task.task_id,
+                    needs_git=bool(task.needs_git)
                 )
             except ValueError as e:
                 self.logger.error(f"Sandbox validation failed: {e}")

@@ -21,7 +21,8 @@ class SandboxManager:
     def create_profile(
         self,
         allowed_directories: List[str],
-        profile_name: Optional[str] = None
+        profile_name: Optional[str] = None,
+        needs_git: bool = False
     ) -> str:
         """
         Generate a sandbox profile that allows writes only to specified directories
@@ -29,6 +30,7 @@ class SandboxManager:
         Args:
             allowed_directories: List of directory paths where writes are allowed
             profile_name: Optional name for the profile (for logging)
+            needs_git: If True, allows access to /dev/null and /dev/tty (needed for git)
 
         Returns:
             Path to the generated .sb profile file
@@ -38,6 +40,7 @@ class SandboxManager:
         - Denies ALL filesystem writes
         - Re-allows writes only to specified directories
         - Always allows writes to /tmp and /private/tmp for temp files
+        - Optionally allows device files (/dev/null, /dev/tty) if needs_git is True
         """
         # Resolve all paths to absolute
         resolved_dirs = []
@@ -97,6 +100,15 @@ class SandboxManager:
         for file_path in sorted(allowed_files):
             profile_lines.append(f'(allow file-write* (literal "{file_path}"))')
 
+        # Add device file access if needed for git
+        if needs_git:
+            profile_lines.append("")
+            profile_lines.append(";; Allow device files needed for git operations")
+            profile_lines.append('(allow file-read* file-write* (literal "/dev/null"))')
+            profile_lines.append('(allow file-read* file-write* (literal "/dev/tty"))')
+            profile_lines.append('(allow file-read* (literal "/dev/random"))')
+            profile_lines.append('(allow file-read* (literal "/dev/urandom"))')
+
         profile_lines.append("")
         profile_lines.append(";; Allow writes to specified directories")
 
@@ -126,7 +138,8 @@ class SandboxManager:
         self,
         command: str,
         allowed_directories: List[str],
-        profile_name: Optional[str] = None
+        profile_name: Optional[str] = None,
+        needs_git: bool = False
     ) -> str:
         """
         Wrap a command with sandbox-exec
@@ -135,11 +148,12 @@ class SandboxManager:
             command: The command to execute
             allowed_directories: List of directories where writes are allowed
             profile_name: Optional name for the profile
+            needs_git: If True, allows access to device files needed for git
 
         Returns:
             The wrapped command string with sandbox-exec
         """
-        profile_path = self.create_profile(allowed_directories, profile_name)
+        profile_path = self.create_profile(allowed_directories, profile_name, needs_git)
 
         # Build sandbox-exec command
         wrapped = f'sandbox-exec -f "{profile_path}" {command}'
