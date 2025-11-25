@@ -99,6 +99,9 @@ All NightShift data is stored in `~/.nightshift/`:
 - 📁 **File Change Tracking**
   Monitors which files were created/modified during execution
 
+- 👁️ **Execution Viewer**
+  Beautiful, human-readable display of task execution sessions
+
 - 🔔 **Rich Notifications**
   Detailed completion summaries with file changes
 
@@ -200,9 +203,27 @@ nightshift revise task_3acf60c6 "Also save the summary as a PDF file"
 # Basic info
 nightshift results task_3acf60c6
 
-# Show full output
+# Show full output (raw JSON)
 nightshift results task_3acf60c6 --show-output
 ```
+</details>
+
+<details>
+<summary><b>👁️ Display execution (NEW!)</b></summary>
+
+```bash
+# View task execution in human-readable format
+# Shows Claude's responses, tool calls, and results as they happened
+nightshift display task_3acf60c6
+```
+
+This command parses the stream-json output and displays it like an actual Claude session:
+- 💬 Claude's messages and reasoning
+- 🔧 Tool calls with parameters
+- ✅ Tool results and errors
+- 📊 Token usage and cost statistics
+
+Perfect for debugging and understanding what happened during execution!
 </details>
 
 <details>

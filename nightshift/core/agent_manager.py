@@ -5,6 +5,7 @@ Spawns claude CLI with specific configurations per task
 import subprocess
 import json
 import time
+import os
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -13,6 +14,7 @@ from .task_queue import Task, TaskQueue, TaskStatus
 from .logger import NightShiftLogger
 from .file_tracker import FileTracker
 from .notifier import Notifier
+from .sandbox import SandboxManager
 
 
 class AgentManager:
@@ -24,7 +26,8 @@ class AgentManager:
         logger: NightShiftLogger,
         output_dir: str = "output",
         claude_bin: str = "claude",
-        enable_notifications: bool = True
+        enable_notifications: bool = True,
+        enable_sandbox: bool = True
     ):
         self.task_queue = task_queue
         self.logger = logger
@@ -32,10 +35,16 @@ class AgentManager:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.claude_bin = claude_bin
         self.enable_notifications = enable_notifications
+        self.enable_sandbox = enable_sandbox
 
         # Notifier uses notifications directory next to output
         notifications_dir = self.output_dir.parent / "notifications"
         self.notifier = Notifier(notification_dir=str(notifications_dir)) if enable_notifications else None
+
+        # Sandbox manager for macOS isolation
+        self.sandbox = SandboxManager() if enable_sandbox and SandboxManager.is_available() else None
+        if enable_sandbox and not self.sandbox:
+            self.logger.warning("Sandboxing requested but sandbox-exec not available on this system")
 
     def execute_task(
         self,
@@ -58,16 +67,39 @@ class AgentManager:
         file_tracker.start_tracking()
 
         try:
-            # Build Claude command
+            # Build Claude command (potentially wrapped with sandbox)
             cmd = self._build_command(task)
 
             # Log the exact command for debugging
-            self.logger.info("=" * 60)
-            self.logger.info("EXECUTING CLAUDE COMMAND:")
-            self.logger.info(cmd)
-            self.logger.info("=" * 60)
+            self.logger.info("=" * 80)
+            self.logger.info("EXECUTING COMMAND:")
+            if self.sandbox and task.allowed_directories:
+                self.logger.info("🔒 SANDBOXED EXECUTION (writes restricted)")
+                self.logger.info(f"   Allowed directories: {task.allowed_directories}")
+            self.logger.info("")
+            self.logger.info(f"Full command: {cmd}")
+            self.logger.info("=" * 80)
 
             self.logger.log_task_started(task.task_id, cmd)
+
+            # Set up environment variables
+            env = dict(os.environ)
+
+            # If needs_git, try to get gh token for sandbox compatibility
+            if task.needs_git:
+                # Try to get gh token from gh CLI
+                try:
+                    token_result = subprocess.run(
+                        ["gh", "auth", "token"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if token_result.returncode == 0:
+                        env['GH_TOKEN'] = token_result.stdout.strip()
+                        self.logger.info("Loaded GH_TOKEN from gh CLI for sandbox compatibility")
+                except Exception as e:
+                    self.logger.warning(f"Could not load GH_TOKEN: {e}")
 
             # Execute with timeout (no timeout for debugging)
             result = subprocess.run(
@@ -75,7 +107,8 @@ class AgentManager:
                 shell=True,
                 capture_output=True,
                 text=True,
-                timeout=timeout  # Only use explicit timeout, no default
+                timeout=timeout,  # Only use explicit timeout, no default
+                env=env
             )
 
             execution_time = time.time() - start_time
@@ -252,7 +285,35 @@ class AgentManager:
             escaped_prompt = task.system_prompt.replace('"', '\\"')
             cmd_parts.append(f'--system-prompt "{escaped_prompt}"')
 
-        return " ".join(cmd_parts)
+        claude_cmd = " ".join(cmd_parts)
+
+        # Wrap with sandbox if enabled
+        if self.sandbox:
+            try:
+                # If no directories specified, run in read-only mode (no write access except /tmp)
+                if not task.allowed_directories:
+                    self.logger.info("Sandboxing task in READ-ONLY mode (no write directories specified)")
+                    # Empty list means no write access except system temp dirs
+                    validated_dirs = []
+                else:
+                    # Validate directories before sandboxing
+                    validated_dirs = SandboxManager.validate_directories(task.allowed_directories)
+                    self.logger.info(f"Sandboxing task with allowed directories: {validated_dirs}")
+
+                if task.needs_git:
+                    self.logger.info("Git operations enabled - allowing device file access")
+
+                return self.sandbox.wrap_command(
+                    claude_cmd,
+                    validated_dirs,
+                    profile_name=task.task_id,
+                    needs_git=bool(task.needs_git)
+                )
+            except ValueError as e:
+                self.logger.error(f"Sandbox validation failed: {e}")
+                raise
+
+        return claude_cmd
 
     def _parse_output(self, stdout: str, stderr: str) -> Dict[str, Any]:
         """

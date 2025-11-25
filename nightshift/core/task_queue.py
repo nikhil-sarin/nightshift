@@ -29,6 +29,8 @@ class Task:
     status: str
     skill_name: Optional[str] = None
     allowed_tools: Optional[List[str]] = None
+    allowed_directories: Optional[List[str]] = None  # Sandbox-allowed write directories
+    needs_git: Optional[bool] = None  # Enable device file access for git operations
     system_prompt: Optional[str] = None
     estimated_tokens: Optional[int] = None
     estimated_time: Optional[int] = None  # seconds
@@ -64,6 +66,8 @@ class TaskQueue:
                     status TEXT NOT NULL,
                     skill_name TEXT,
                     allowed_tools TEXT,  -- JSON array
+                    allowed_directories TEXT,  -- JSON array for sandbox
+                    needs_git INTEGER,  -- Boolean: enable device files for git
                     system_prompt TEXT,
                     estimated_tokens INTEGER,
                     estimated_time INTEGER,
@@ -77,6 +81,14 @@ class TaskQueue:
                     execution_time REAL
                 )
             """)
+
+            # Migration: Add needs_git column if it doesn't exist
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(tasks)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if 'needs_git' not in columns:
+                conn.execute("ALTER TABLE tasks ADD COLUMN needs_git INTEGER")
+                conn.commit()
 
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS task_logs (
@@ -97,6 +109,8 @@ class TaskQueue:
         description: str,
         skill_name: Optional[str] = None,
         allowed_tools: Optional[List[str]] = None,
+        allowed_directories: Optional[List[str]] = None,
+        needs_git: Optional[bool] = None,
         system_prompt: Optional[str] = None,
         estimated_tokens: Optional[int] = None,
         estimated_time: Optional[int] = None
@@ -110,6 +124,8 @@ class TaskQueue:
             status=TaskStatus.STAGED.value,
             skill_name=skill_name,
             allowed_tools=allowed_tools,
+            allowed_directories=allowed_directories,
+            needs_git=needs_git,
             system_prompt=system_prompt,
             estimated_tokens=estimated_tokens,
             estimated_time=estimated_time,
@@ -121,15 +137,17 @@ class TaskQueue:
             conn.execute("""
                 INSERT INTO tasks (
                     task_id, description, status, skill_name, allowed_tools,
-                    system_prompt, estimated_tokens, estimated_time,
+                    allowed_directories, needs_git, system_prompt, estimated_tokens, estimated_time,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 task.task_id,
                 task.description,
                 task.status,
                 task.skill_name,
                 json.dumps(task.allowed_tools) if task.allowed_tools else None,
+                json.dumps(task.allowed_directories) if task.allowed_directories else None,
+                1 if task.needs_git else 0,
                 task.system_prompt,
                 task.estimated_tokens,
                 task.estimated_time,
@@ -159,6 +177,8 @@ class TaskQueue:
                 status=row["status"],
                 skill_name=row["skill_name"],
                 allowed_tools=json.loads(row["allowed_tools"]) if row["allowed_tools"] else None,
+                allowed_directories=json.loads(row["allowed_directories"]) if row["allowed_directories"] else None,
+                needs_git=bool(row["needs_git"]) if row["needs_git"] is not None else None,
                 system_prompt=row["system_prompt"],
                 estimated_tokens=row["estimated_tokens"],
                 estimated_time=row["estimated_time"],
@@ -195,6 +215,8 @@ class TaskQueue:
                     status=row["status"],
                     skill_name=row["skill_name"],
                     allowed_tools=json.loads(row["allowed_tools"]) if row["allowed_tools"] else None,
+                    allowed_directories=json.loads(row["allowed_directories"]) if row["allowed_directories"] else None,
+                    needs_git=bool(row["needs_git"]) if row["needs_git"] is not None else None,
                     system_prompt=row["system_prompt"],
                     estimated_tokens=row["estimated_tokens"],
                     estimated_time=row["estimated_time"],
@@ -252,6 +274,7 @@ class TaskQueue:
         task_id: str,
         description: str,
         allowed_tools: Optional[List[str]] = None,
+        allowed_directories: Optional[List[str]] = None,
         system_prompt: Optional[str] = None,
         estimated_tokens: Optional[int] = None,
         estimated_time: Optional[int] = None
@@ -267,6 +290,7 @@ class TaskQueue:
                 """UPDATE tasks SET
                     description = ?,
                     allowed_tools = ?,
+                    allowed_directories = ?,
                     system_prompt = ?,
                     estimated_tokens = ?,
                     estimated_time = ?,
@@ -275,6 +299,7 @@ class TaskQueue:
                 (
                     description,
                     json.dumps(allowed_tools) if allowed_tools else None,
+                    json.dumps(allowed_directories) if allowed_directories else None,
                     system_prompt,
                     estimated_tokens,
                     estimated_time,
