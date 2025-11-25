@@ -16,6 +16,7 @@ from ..core.task_planner import TaskPlanner
 from ..core.agent_manager import AgentManager
 from ..core.logger import NightShiftLogger
 from ..core.config import Config
+from ..core.output_viewer import OutputViewer
 
 
 # Initialize rich console for pretty output
@@ -306,6 +307,32 @@ def results(ctx, task_id, show_output):
             console.print(f"[red]Failed to read output: {e}[/red]")
 
     console.print()
+
+
+@cli.command()
+@click.argument('task_id')
+@click.pass_context
+def display(ctx, task_id):
+    """Display task execution output in human-readable format"""
+    task_queue = ctx.obj['task_queue']
+    config = ctx.obj['config']
+
+    # Get task
+    task = task_queue.get_task(task_id)
+    if not task:
+        console.print(f"\n[bold red]Error:[/bold red] Task {task_id} not found\n")
+        raise click.Abort()
+
+    # Check if task has output
+    if not task.result_path:
+        console.print(f"\n[bold yellow]Warning:[/bold yellow] Task {task_id} has no output yet\n")
+        console.print(f"[dim]Current status: {task.status}[/dim]\n")
+        raise click.Abort()
+
+    # Use OutputViewer to display the execution
+    viewer = OutputViewer()
+    console.print()  # Add spacing
+    viewer.display_task_output(task.result_path)
 
 
 @cli.command()
