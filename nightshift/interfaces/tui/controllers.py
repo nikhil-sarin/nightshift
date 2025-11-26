@@ -57,12 +57,20 @@ class TUIController:
             try:
                 target(*args, **kwargs)
             finally:
-                # Clear busy state, but keep any message set by worker
-                self.state.busy = False
-                self.state.busy_label = ""
-                # Don't call refresh_tasks() from worker thread - causes race conditions
-                # The auto-refresh loop will pick up changes within 2 seconds
-                self._invalidate()
+                # Use call_from_executor to modify state from main thread
+                # This prevents UI corruption from concurrent state modification
+                def clear_busy():
+                    self.state.busy = False
+                    self.state.busy_label = ""
+                    # Don't call refresh_tasks() from worker thread - causes race conditions
+                    # The auto-refresh loop will pick up changes within 2 seconds
+                    self._invalidate()
+
+                try:
+                    get_app().loop.call_soon_threadsafe(clear_busy)
+                except Exception:
+                    # Fallback if app is shutting down
+                    pass
 
         threading.Thread(target=worker, daemon=True).start()
 
