@@ -856,6 +856,14 @@ def clear(ctx, confirm):
         console.print(f"\n[dim]Nothing to clear[/dim]\n")
 
 
+@cli.command()
+@click.pass_context
+def tui(ctx):
+    """Launch interactive terminal UI"""
+    from .tui import run
+    run()
+
+
 def main():
     """Entry point"""
     cli(obj={})
