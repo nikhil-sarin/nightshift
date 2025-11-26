@@ -930,9 +930,19 @@ def status(ctx):
         table.add_row("Status", "[red]○ Stopped[/red]")
 
     table.add_row("Max Workers", str(status['max_workers']))
-    table.add_row("Running Tasks", str(status['running_tasks']))
+
+    # Handle "unknown" running tasks (when checking from another process)
+    running_tasks_display = str(status['running_tasks'])
+    if status['running_tasks'] == "unknown":
+        running_tasks_display = "[dim]unknown (other process)[/dim]"
+    table.add_row("Running Tasks", running_tasks_display)
+
     table.add_row("Available Workers", str(status['available_workers']))
     table.add_row("Poll Interval", f"{status['poll_interval']}s")
+
+    # Show PID if available (executor in another process)
+    if 'pid' in status:
+        table.add_row("Process ID", f"[dim]{status['pid']}[/dim]")
 
     console.print(table)
 

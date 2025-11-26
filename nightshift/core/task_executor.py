@@ -6,6 +6,8 @@ import threading
 import time
 import signal
 import sys
+import os
+import json
 from concurrent.futures import ThreadPoolExecutor, Future
 from typing import Dict, Optional, Set
 from pathlib import Path
@@ -30,7 +32,8 @@ class TaskExecutor:
         agent_manager: AgentManager,
         logger: NightShiftLogger,
         max_workers: int = 3,
-        poll_interval: float = 1.0
+        poll_interval: float = 1.0,
+        pid_file: Optional[Path] = None
     ):
         """
         Initialize task executor
@@ -41,12 +44,14 @@ class TaskExecutor:
             logger: Logger instance
             max_workers: Maximum number of concurrent task executions
             poll_interval: How often to poll for new tasks (seconds)
+            pid_file: Path to PID file for tracking executor state
         """
         self.task_queue = task_queue
         self.agent_manager = agent_manager
         self.logger = logger
         self.max_workers = max_workers
         self.poll_interval = poll_interval
+        self.pid_file = pid_file or Path.home() / ".nightshift" / "executor.pid"
 
         # Thread pool for concurrent task execution
         self.executor = ThreadPoolExecutor(
@@ -73,6 +78,21 @@ class TaskExecutor:
 
         self.is_running = True
         self.shutdown_event.clear()
+
+        # Write PID file for cross-process visibility
+        try:
+            pid_data = {
+                "pid": os.getpid(),
+                "max_workers": self.max_workers,
+                "poll_interval": self.poll_interval,
+                "started_at": time.time()
+            }
+            self.pid_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.pid_file, 'w') as f:
+                json.dump(pid_data, f)
+            self.logger.debug(f"PID file written to {self.pid_file}")
+        except Exception as e:
+            self.logger.error(f"Failed to write PID file: {e}")
 
         # Start polling thread
         self.poll_thread = threading.Thread(
@@ -107,6 +127,14 @@ class TaskExecutor:
         # Shutdown executor (waits for running tasks)
         self.logger.info(f"Waiting up to {timeout}s for {len(self.running_tasks)} running tasks to complete...")
         self.executor.shutdown(wait=True, cancel_futures=False)
+
+        # Remove PID file
+        try:
+            if self.pid_file.exists():
+                self.pid_file.unlink()
+                self.logger.debug(f"PID file removed: {self.pid_file}")
+        except Exception as e:
+            self.logger.error(f"Failed to remove PID file: {e}")
 
         self.is_running = False
         self.logger.info("Task executor stopped")
@@ -294,15 +322,49 @@ class ExecutorManager:
 
     @classmethod
     def get_status(cls) -> Dict:
-        """Get executor status"""
+        """Get executor status (checks both local instance and PID file)"""
         with cls._lock:
-            if cls._instance:
+            # First check if we have a local running instance
+            if cls._instance and cls._instance.is_running:
                 return cls._instance.get_status()
-            else:
-                return {
-                    "is_running": False,
-                    "max_workers": 0,
-                    "running_tasks": 0,
-                    "available_workers": 0,
-                    "poll_interval": 0
-                }
+
+            # Check PID file for executor running in another process
+            pid_file = Path.home() / ".nightshift" / "executor.pid"
+            if pid_file.exists():
+                try:
+                    with open(pid_file) as f:
+                        pid_data = json.load(f)
+
+                    pid = pid_data["pid"]
+
+                    # Check if process is still alive
+                    try:
+                        os.kill(pid, 0)  # Signal 0 doesn't kill, just checks if process exists
+                        # Process is alive
+                        return {
+                            "is_running": True,
+                            "max_workers": pid_data["max_workers"],
+                            "running_tasks": "unknown",  # Can't know from other process
+                            "available_workers": pid_data["max_workers"],
+                            "poll_interval": pid_data["poll_interval"],
+                            "pid": pid
+                        }
+                    except OSError:
+                        # Process not found - stale PID file
+                        pid_file.unlink()
+
+                except (json.JSONDecodeError, KeyError, FileNotFoundError):
+                    # Invalid or corrupted PID file, clean it up
+                    try:
+                        pid_file.unlink()
+                    except:
+                        pass
+
+            # No running executor found
+            return {
+                "is_running": False,
+                "max_workers": 0,
+                "running_tasks": 0,
+                "available_workers": 0,
+                "poll_interval": 0
+            }
