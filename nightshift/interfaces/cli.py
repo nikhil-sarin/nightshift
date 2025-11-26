@@ -392,6 +392,7 @@ def revise(ctx, task_id, feedback, timeout):
             task_id=task_id,
             description=revised_plan['enhanced_prompt'],
             allowed_tools=revised_plan['allowed_tools'],
+            allowed_directories=revised_plan.get('allowed_directories', []),
             system_prompt=revised_plan['system_prompt'],
             timeout_seconds=final_timeout
         )
