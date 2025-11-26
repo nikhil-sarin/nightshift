@@ -92,7 +92,8 @@ def create_keybindings(state: UIState, controller, cmd_widget) -> KeyBindings:
         """Quit the TUI"""
         event.app.exit()
 
-    # Refresh
+    # Refresh (R key is more reliable than c-l which terminals often intercept)
+    @kb.add('R', filter=is_normal_mode)
     @kb.add('c-l', filter=is_normal_mode)
     def _(event):
         """Hard refresh from backend"""

@@ -191,6 +191,9 @@ class TUIController:
             auto = cmd.endswith("!")
             desc = " ".join(args)
             self.submit_task(desc, auto_approve=auto)
+        elif cmd in ("refresh", "r"):
+            self.refresh_tasks()
+            self.state.message = "Refreshed"
         elif cmd == "help" or cmd == "h":
             self._cmd_help()
         elif cmd == "quit" or cmd == "q":
@@ -255,7 +258,7 @@ class TUIController:
 
     def _cmd_help(self):
         """Handle :help command"""
-        self.state.message = "Commands: :queue [status] | :status <task_id> | :results [task_id] | :submit <desc> | :help | :quit"
+        self.state.message = "Commands: :queue [status] | :status <task_id> | :results [task_id] | :submit <desc> | :refresh | :help | :quit"
 
     # ----- Phase 3 actions: submit/approve/reject -----
 

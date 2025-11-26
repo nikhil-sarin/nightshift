@@ -224,7 +224,7 @@ class StatusBarControl(FormattedTextControl):
         msg = self.state.busy_label or self.state.message or ""
 
         # Show keybinding hints
-        hints = "j/k:nav g/G:first/last 1-4:tabs H/L:prev/next q:quit ^L:refresh"
+        hints = "j/k:nav g/G:first/last 1-4:tabs H/L:prev/next q:quit R:refresh"
 
         # Limit message length to make room for hints
         msg = msg[:40] if msg else ""
