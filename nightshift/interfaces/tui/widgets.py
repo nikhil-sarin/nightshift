@@ -226,11 +226,16 @@ class StatusBarControl(FormattedTextControl):
         # Show keybinding hints
         hints = "j/k:nav g/G:first/last 1-4:tabs H/L:prev/next q:quit R:refresh"
 
-        # Limit message length to make room for hints
-        msg = msg[:40] if msg else ""
-
         if msg:
-            text = f" {mode} | {hints} | {msg}"
+            # If message is an error (contains "failed" or "error"), prioritize it
+            if "failed" in msg.lower() or "error" in msg.lower():
+                # Show full error message, truncate if necessary but allow more space
+                msg_truncated = msg[:120] if len(msg) > 120 else msg
+                text = f" {mode} | {msg_truncated}"
+            else:
+                # Normal message - limit to make room for hints
+                msg_truncated = msg[:40] if len(msg) > 40 else msg
+                text = f" {mode} | {hints} | {msg_truncated}"
         else:
             text = f" {mode} | {hints}"
 

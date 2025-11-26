@@ -4,6 +4,7 @@ Business logic layer that interfaces with NightShift core
 """
 import json
 import threading
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -277,8 +278,12 @@ class TUIController:
                 # Plan task
                 plan = self.planner.plan_task(description)
 
+                # Generate unique task ID
+                task_id = f"task_{uuid.uuid4().hex[:8]}"
+
                 # Create task in queue
                 task = self.queue.create_task(
+                    task_id=task_id,
                     description=plan.get("enhanced_prompt", description),
                     allowed_tools=plan.get("allowed_tools") or [],
                     allowed_directories=plan.get("allowed_directories") or [],
@@ -288,7 +293,6 @@ class TUIController:
                     estimated_time=plan.get("estimated_time"),
                 )
 
-                task_id = task.task_id
                 self.logger.info(f"TUI: created task {task_id}")
                 self.state.message = f"Created task {task_id}"
 
