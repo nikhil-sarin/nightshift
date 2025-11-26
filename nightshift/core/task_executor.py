@@ -74,6 +74,34 @@ class TaskExecutor:
             self.logger.warning("Task executor is already running")
             return
 
+        # Check for existing PID file (another executor may be running)
+        if self.pid_file.exists():
+            try:
+                with open(self.pid_file) as f:
+                    existing_pid_data = json.load(f)
+                existing_pid = existing_pid_data["pid"]
+
+                # Check if process is still alive
+                try:
+                    os.kill(existing_pid, 0)
+                    # Process is alive - another executor is running
+                    raise RuntimeError(
+                        f"Another executor is already running (PID {existing_pid}). "
+                        f"Stop it first with 'nightshift executor stop' or kill process {existing_pid}"
+                    )
+                except OSError:
+                    # Process is dead - stale PID file, clean it up
+                    self.logger.warning(f"Found stale PID file (PID {existing_pid} not running), removing it")
+                    self.pid_file.unlink()
+
+            except (json.JSONDecodeError, KeyError, FileNotFoundError) as e:
+                # Corrupted or invalid PID file, clean it up
+                self.logger.warning(f"Found invalid PID file, removing it: {e}")
+                try:
+                    self.pid_file.unlink()
+                except:
+                    pass
+
         self.logger.info(f"Starting task executor (max_workers={self.max_workers}, poll_interval={self.poll_interval}s)")
 
         self.is_running = True
@@ -93,6 +121,15 @@ class TaskExecutor:
             self.logger.debug(f"PID file written to {self.pid_file}")
         except Exception as e:
             self.logger.error(f"Failed to write PID file: {e}")
+            raise
+
+        # Register signal handlers for graceful shutdown
+        def signal_handler(signum, frame):
+            self.logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+            self.stop()
+
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
 
         # Start polling thread
         self.poll_thread = threading.Thread(
@@ -310,10 +347,53 @@ class ExecutorManager:
 
     @classmethod
     def stop_executor(cls, timeout: float = 30.0):
-        """Stop the global executor instance"""
+        """Stop the global executor instance (or executor in another process)"""
         with cls._lock:
+            # First try to stop local instance
             if cls._instance:
                 cls._instance.stop(timeout=timeout)
+                return
+
+            # Check if executor is running in another process
+            pid_file = Path.home() / ".nightshift" / "executor.pid"
+            if pid_file.exists():
+                try:
+                    with open(pid_file) as f:
+                        pid_data = json.load(f)
+                    pid = pid_data["pid"]
+
+                    # Check if process is alive
+                    try:
+                        os.kill(pid, 0)
+                        # Process is alive - send SIGTERM for graceful shutdown
+                        os.kill(pid, signal.SIGTERM)
+
+                        # Wait a bit for graceful shutdown
+                        import time
+                        time.sleep(2)
+
+                        # Check if it stopped
+                        try:
+                            os.kill(pid, 0)
+                            # Still running - warn user
+                            raise RuntimeError(
+                                f"Executor process {pid} did not stop gracefully. "
+                                f"You may need to manually kill it: kill {pid}"
+                            )
+                        except OSError:
+                            # Process stopped, clean up PID file
+                            pid_file.unlink()
+
+                    except OSError:
+                        # Process already dead, clean up PID file
+                        pid_file.unlink()
+
+                except (json.JSONDecodeError, KeyError, FileNotFoundError):
+                    # Invalid PID file, clean it up
+                    try:
+                        pid_file.unlink()
+                    except:
+                        pass
 
     @classmethod
     def get_executor(cls) -> Optional[TaskExecutor]:
