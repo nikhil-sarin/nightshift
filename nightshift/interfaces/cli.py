@@ -405,9 +405,20 @@ def revise(ctx, task_id, feedback, timeout):
         # Display revised plan
         console.print(f"\n[bold green]✓ Plan revised:[/bold green] {task_id}")
 
+        # Format allowed directories for display
+        allowed_dirs = revised_plan.get('allowed_directories', [])
+        if allowed_dirs:
+            dirs_display = "\n  ".join([f"• {d}" for d in allowed_dirs])
+        else:
+            dirs_display = "  • [dim](none - read-only mode)[/dim]"
+
+        # Add git status if enabled
+        git_status = " + git support (device files)" if revised_plan.get('needs_git', False) else ""
+
         panel = Panel.fit(
             f"[yellow]Revised prompt:[/yellow] {revised_plan['enhanced_prompt']}\n\n"
             f"[yellow]Tools needed:[/yellow] {', '.join(revised_plan['allowed_tools'])}\n\n"
+            f"[yellow]Sandbox (write access):[/yellow]\n{dirs_display}{git_status}\n\n"
             f"[yellow]Timeout:[/yellow] {final_timeout}s ({final_timeout // 60}m {final_timeout % 60}s)\n\n"
             f"[yellow]Changes:[/yellow] {revised_plan.get('reasoning', 'N/A')}",
             title=f"Revised Plan: {task_id}",
