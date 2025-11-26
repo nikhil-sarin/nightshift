@@ -191,7 +191,7 @@ class SlackEventHandler:
                 return jsonify({"text": f"Task {task_id} not found"})
 
             if action == "approve":
-                # Update task status
+                # Update task status to COMMITTED (executor will pick it up)
                 self.task_queue.update_status(task_id, TaskStatus.COMMITTED)
 
                 # Update Slack message
@@ -203,19 +203,17 @@ class SlackEventHandler:
                         "type": "section",
                         "text": {
                             "type": "mrkdwn",
-                            "text": f"✅ Task {task_id} approved by <@{user_id}>\n⏳ Executing..."
+                            "text": f"✅ Task {task_id} approved by <@{user_id}>\n⏳ Queued for execution (will be picked up by executor service)"
                         }
                     }]
                 )
 
-                # Start execution async
-                threading.Thread(
-                    target=self._execute_and_notify,
-                    args=(task, channel_id, message_ts),
-                    daemon=True
-                ).start()
+                self.logger.info(f"Task {task_id} approved via Slack and queued for execution")
 
-                return jsonify({"text": "Task approved and executing"})
+                # Task will be executed by the executor service
+                # Notifier will post completion notification to Slack automatically
+
+                return jsonify({"text": "Task approved and queued for execution"})
 
             elif action == "reject":
                 # Update task status

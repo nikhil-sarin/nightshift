@@ -51,16 +51,43 @@ class Task:
 
 
 class TaskQueue:
-    """SQLite-backed task queue with state management"""
+    """SQLite-backed task queue with state management (thread-safe)"""
 
     def __init__(self, db_path: str = "database/nightshift.db"):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        self._enable_wal_mode()
+
+    def _get_connection(self):
+        """
+        Get a database connection with settings optimized for concurrent access
+
+        Returns:
+            sqlite3.Connection with thread-safe settings
+        """
+        conn = sqlite3.connect(
+            str(self.db_path),
+            check_same_thread=False,  # Allow multi-thread access
+            timeout=30.0,  # Wait up to 30s for database locks
+            isolation_level='DEFERRED'  # Reduce lock contention
+        )
+        return conn
+
+    def _enable_wal_mode(self):
+        """
+        Enable Write-Ahead Logging (WAL) mode for better concurrent access
+
+        WAL mode allows multiple readers and one writer to access the database
+        concurrently without blocking each other.
+        """
+        with self._get_connection() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.commit()
 
     def _init_db(self):
         """Initialize database schema"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS tasks (
                     task_id TEXT PRIMARY KEY,
@@ -141,7 +168,7 @@ class TaskQueue:
             updated_at=now
         )
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             conn.execute("""
                 INSERT INTO tasks (
                     task_id, description, status, skill_name, allowed_tools,
@@ -168,7 +195,7 @@ class TaskQueue:
 
     def get_task(self, task_id: str) -> Optional[Task]:
         """Retrieve a task by ID"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 "SELECT * FROM tasks WHERE task_id = ?",
@@ -203,7 +230,7 @@ class TaskQueue:
 
     def list_tasks(self, status: Optional[TaskStatus] = None) -> List[Task]:
         """List all tasks, optionally filtered by status"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
 
             if status:
@@ -271,7 +298,7 @@ class TaskQueue:
 
         values.append(task_id)
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.execute(
                 f"UPDATE tasks SET {', '.join(update_fields)} WHERE task_id = ?",
                 values
@@ -295,7 +322,7 @@ class TaskQueue:
         """
         now = datetime.now().isoformat()
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.execute(
                 """UPDATE tasks SET
                     description = ?,
@@ -323,7 +350,7 @@ class TaskQueue:
 
     def add_log(self, task_id: str, log_level: str, message: str):
         """Add a log entry for a task"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             conn.execute("""
                 INSERT INTO task_logs (task_id, timestamp, log_level, message)
                 VALUES (?, ?, ?, ?)
@@ -332,7 +359,7 @@ class TaskQueue:
 
     def get_logs(self, task_id: str) -> List[Dict[str, Any]]:
         """Retrieve all logs for a task"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
                 SELECT timestamp, log_level, message
@@ -342,3 +369,67 @@ class TaskQueue:
             """, (task_id,))
 
             return [dict(row) for row in cursor.fetchall()]
+
+    def acquire_task_for_execution(self) -> Optional[Task]:
+        """
+        Atomically get next COMMITTED task and mark as RUNNING
+
+        This method is thread-safe and designed for concurrent executor workers.
+        It uses BEGIN IMMEDIATE to acquire an exclusive lock before checking
+        and updating the task status.
+
+        Returns:
+            Task object if one was acquired, None if no COMMITTED tasks available
+        """
+        conn = self._get_connection()
+        try:
+            # BEGIN IMMEDIATE acquires a write lock immediately
+            conn.execute("BEGIN IMMEDIATE")
+
+            # Find the oldest COMMITTED task
+            cursor = conn.execute("""
+                SELECT task_id FROM tasks
+                WHERE status = ?
+                ORDER BY created_at ASC
+                LIMIT 1
+            """, (TaskStatus.COMMITTED.value,))
+
+            row = cursor.fetchone()
+            if not row:
+                conn.rollback()
+                return None
+
+            task_id = row[0]
+
+            # Update to RUNNING
+            now = datetime.now().isoformat()
+            conn.execute("""
+                UPDATE tasks
+                SET status = ?, updated_at = ?, started_at = ?
+                WHERE task_id = ?
+            """, (TaskStatus.RUNNING.value, now, now, task_id))
+
+            conn.commit()
+
+            # Return the task (using a fresh read)
+            return self.get_task(task_id)
+
+        except Exception as e:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def count_running_tasks(self) -> int:
+        """
+        Count how many tasks are currently in RUNNING state
+
+        Returns:
+            Number of running tasks
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT COUNT(*) FROM tasks WHERE status = ?",
+                (TaskStatus.RUNNING.value,)
+            )
+            return cursor.fetchone()[0]
