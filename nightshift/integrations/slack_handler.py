@@ -121,7 +121,6 @@ class SlackEventHandler:
                 allowed_directories=plan.get('allowed_directories', []),
                 needs_git=plan.get('needs_git', False),
                 system_prompt=plan['system_prompt'],
-                estimated_tokens=plan['estimated_tokens'],
                 timeout_seconds=900  # 15 minutes default for Slack tasks
             )
 
@@ -309,8 +308,7 @@ class SlackEventHandler:
 {task.description[:1000]}
 
 *Status:* {task.status}
-*Estimated Tokens:* {task.estimated_tokens}
-*Estimated Time:* {task.estimated_time}s
+*Timeout:* {task.timeout_seconds}s ({task.timeout_seconds // 60}m)
 *Needs Git:* {'Yes' if task.needs_git else 'No'}
 
 *Allowed Tools:*

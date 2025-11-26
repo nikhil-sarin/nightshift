@@ -80,7 +80,6 @@ Respond with ONLY a JSON object (no other text) with this structure:
     "allowed_directories": ["/absolute/path/to/dir1", "/absolute/path/to/dir2"],
     "needs_git": false,
     "system_prompt": "System prompt for the executor",
-    "estimated_tokens": 1000,
     "reasoning": "Brief explanation of tool choices and directory permissions"
 }}
 
@@ -88,7 +87,6 @@ Guidelines:
 - Be specific about which tools are needed
 - Include file operations tools (Write, Read) if outputs need to be saved
 - For arxiv tasks, include mcp__arxiv__download and either mcp__gemini__ask or mcp__claude__ask for summarization
-- Estimated tokens: add ~2000 for paper tasks, ~1000 for data tasks, ~500 base
 
 **NEEDS_GIT FLAG (CRITICAL):**
 - Set needs_git to true if the task involves ANY of these:
@@ -134,10 +132,9 @@ Guidelines:
                     "allowed_directories": {"type": "array", "items": {"type": "string"}},
                     "needs_git": {"type": "boolean"},
                     "system_prompt": {"type": "string"},
-                    "estimated_tokens": {"type": "integer"},
                     "reasoning": {"type": "string"}
                 },
-                "required": ["enhanced_prompt", "allowed_tools", "allowed_directories", "needs_git", "system_prompt", "estimated_tokens"]
+                "required": ["enhanced_prompt", "allowed_tools", "allowed_directories", "needs_git", "system_prompt"]
             })
 
             cmd = [
@@ -194,7 +191,7 @@ Guidelines:
 
             # Validate required fields
             required_fields = ["enhanced_prompt", "allowed_tools", "allowed_directories",
-                             "needs_git", "system_prompt", "estimated_tokens"]
+                             "needs_git", "system_prompt"]
             for field in required_fields:
                 if field not in plan:
                     raise Exception(f"Planning response missing field: {field}")
@@ -336,7 +333,7 @@ Guidelines:
 
             # Validate required fields
             required_fields = ["enhanced_prompt", "allowed_tools", "allowed_directories",
-                             "needs_git", "system_prompt", "estimated_tokens"]
+                             "needs_git", "system_prompt"]
             for field in required_fields:
                 if field not in refined_plan:
                     raise Exception(f"Refined plan missing field: {field}")

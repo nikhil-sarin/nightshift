@@ -92,7 +92,6 @@ def submit(ctx, description, auto_approve, sync, timeout, planning_timeout, allo
             allowed_directories=allowed_directories,
             needs_git=plan.get('needs_git', False),
             system_prompt=plan['system_prompt'],
-            estimated_tokens=plan['estimated_tokens'],
             timeout_seconds=timeout
         )
 
@@ -112,7 +111,6 @@ def submit(ctx, description, auto_approve, sync, timeout, planning_timeout, allo
             f"[yellow]Enhanced prompt:[/yellow] {plan['enhanced_prompt']}\n\n"
             f"[yellow]Tools needed:[/yellow] {', '.join(plan['allowed_tools'])}\n\n"
             f"[yellow]Sandbox (write access):[/yellow]\n{dirs_display}{git_status}\n\n"
-            f"[yellow]Estimated:[/yellow] ~{plan['estimated_tokens']} tokens\n\n"
             f"[yellow]Timeout:[/yellow] {timeout}s ({timeout // 60}m {timeout % 60}s)\n\n"
             f"[yellow]Reasoning:[/yellow] {plan.get('reasoning', 'N/A')}",
             title=f"Task Plan: {task_id}",
@@ -223,7 +221,7 @@ def queue(ctx, status):
     table.add_column("ID", style="cyan")
     table.add_column("Status", style="yellow")
     table.add_column("Description", style="white")
-    table.add_column("Est. Time", justify="right")
+    table.add_column("Timeout", justify="right")
     table.add_column("Created", style="dim")
 
     for task in tasks:
@@ -238,11 +236,13 @@ def queue(ctx, status):
             "cancelled": "dim"
         }.get(task.status, "white")
 
+        timeout_display = f"{task.timeout_seconds}s" if task.timeout_seconds else "900s"
+
         table.add_row(
             task.task_id,
             f"[{status_color}]{task.status.upper()}[/{status_color}]",
             task.description[:60] + "..." if len(task.description) > 60 else task.description,
-            f"{task.estimated_time}s" if task.estimated_time else "N/A",
+            timeout_display,
             task.created_at.split('T')[0] if task.created_at else "N/A"
         )
 
@@ -378,7 +378,6 @@ def revise(ctx, task_id, feedback, timeout):
             'enhanced_prompt': task.description,
             'allowed_tools': task.allowed_tools or [],
             'system_prompt': task.system_prompt or '',
-            'estimated_tokens': task.estimated_tokens or 0,
             'timeout_seconds': task.timeout_seconds or 900
         }
 
@@ -394,7 +393,6 @@ def revise(ctx, task_id, feedback, timeout):
             description=revised_plan['enhanced_prompt'],
             allowed_tools=revised_plan['allowed_tools'],
             system_prompt=revised_plan['system_prompt'],
-            estimated_tokens=revised_plan['estimated_tokens'],
             timeout_seconds=final_timeout
         )
 
@@ -410,7 +408,6 @@ def revise(ctx, task_id, feedback, timeout):
         panel = Panel.fit(
             f"[yellow]Revised prompt:[/yellow] {revised_plan['enhanced_prompt']}\n\n"
             f"[yellow]Tools needed:[/yellow] {', '.join(revised_plan['allowed_tools'])}\n\n"
-            f"[yellow]Estimated:[/yellow] ~{revised_plan['estimated_tokens']} tokens\n\n"
             f"[yellow]Timeout:[/yellow] {final_timeout}s ({final_timeout // 60}m {final_timeout % 60}s)\n\n"
             f"[yellow]Changes:[/yellow] {revised_plan.get('reasoning', 'N/A')}",
             title=f"Revised Plan: {task_id}",

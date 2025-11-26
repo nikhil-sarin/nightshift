@@ -33,7 +33,6 @@ class Task:
     allowed_directories: Optional[List[str]] = None  # Sandbox-allowed write directories
     needs_git: Optional[bool] = None  # Enable device file access for git operations
     system_prompt: Optional[str] = None
-    estimated_tokens: Optional[int] = None
     timeout_seconds: Optional[int] = None  # Execution timeout (default: 900 = 15 mins)
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -98,7 +97,6 @@ class TaskQueue:
                     allowed_directories TEXT,  -- JSON array for sandbox
                     needs_git INTEGER,  -- Boolean: enable device files for git
                     system_prompt TEXT,
-                    estimated_tokens INTEGER,
                     timeout_seconds INTEGER DEFAULT 900,  -- Execution timeout (default: 15 mins)
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
@@ -155,7 +153,6 @@ class TaskQueue:
         allowed_directories: Optional[List[str]] = None,
         needs_git: Optional[bool] = None,
         system_prompt: Optional[str] = None,
-        estimated_tokens: Optional[int] = None,
         timeout_seconds: Optional[int] = 900  # Default 15 minutes
     ) -> Task:
         """Create a new task in STAGED state"""
@@ -170,7 +167,6 @@ class TaskQueue:
             allowed_directories=allowed_directories,
             needs_git=needs_git,
             system_prompt=system_prompt,
-            estimated_tokens=estimated_tokens,
             timeout_seconds=timeout_seconds,
             created_at=now,
             updated_at=now
@@ -180,9 +176,9 @@ class TaskQueue:
             conn.execute("""
                 INSERT INTO tasks (
                     task_id, description, status, skill_name, allowed_tools,
-                    allowed_directories, needs_git, system_prompt, estimated_tokens, timeout_seconds,
+                    allowed_directories, needs_git, system_prompt, timeout_seconds,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 task.task_id,
                 task.description,
@@ -192,7 +188,6 @@ class TaskQueue:
                 json.dumps(task.allowed_directories) if task.allowed_directories else None,
                 1 if task.needs_git else 0,
                 task.system_prompt,
-                task.estimated_tokens,
                 task.timeout_seconds,
                 task.created_at,
                 task.updated_at
@@ -230,7 +225,6 @@ class TaskQueue:
                 allowed_directories=json.loads(row["allowed_directories"]) if row["allowed_directories"] else None,
                 needs_git=bool(row["needs_git"]) if row["needs_git"] is not None else None,
                 system_prompt=row["system_prompt"],
-                estimated_tokens=row["estimated_tokens"],
                 timeout_seconds=timeout_val,
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
@@ -276,7 +270,6 @@ class TaskQueue:
                     allowed_directories=json.loads(row["allowed_directories"]) if row["allowed_directories"] else None,
                     needs_git=bool(row["needs_git"]) if row["needs_git"] is not None else None,
                     system_prompt=row["system_prompt"],
-                    estimated_tokens=row["estimated_tokens"],
                     timeout_seconds=timeout_val,
                     created_at=row["created_at"],
                     updated_at=row["updated_at"],
@@ -335,7 +328,6 @@ class TaskQueue:
         allowed_tools: Optional[List[str]] = None,
         allowed_directories: Optional[List[str]] = None,
         system_prompt: Optional[str] = None,
-        estimated_tokens: Optional[int] = None,
         timeout_seconds: Optional[int] = None
     ) -> bool:
         """
@@ -351,7 +343,6 @@ class TaskQueue:
                     allowed_tools = ?,
                     allowed_directories = ?,
                     system_prompt = ?,
-                    estimated_tokens = ?,
                     timeout_seconds = ?,
                     updated_at = ?
                 WHERE task_id = ? AND status = ?""",
@@ -360,7 +351,6 @@ class TaskQueue:
                     json.dumps(allowed_tools) if allowed_tools else None,
                     json.dumps(allowed_directories) if allowed_directories else None,
                     system_prompt,
-                    estimated_tokens,
                     timeout_seconds,
                     now,
                     task_id,
