@@ -224,7 +224,7 @@ class StatusBarControl(FormattedTextControl):
         msg = self.state.busy_label or self.state.message or ""
 
         # Show keybinding hints
-        hints = "j/k:nav g/G:first/last 1-4:tabs H/L:prev/next q:quit R:refresh"
+        hints = "j/k:nav 1-4:tabs a/r/p/P/X/s:task q:quit R:refresh :help"
 
         if msg:
             # If message is an error (contains "failed" or "error"), prioritize it

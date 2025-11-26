@@ -195,6 +195,14 @@ class TUIController:
         elif cmd in ("refresh", "r"):
             self.refresh_tasks()
             self.state.message = "Refreshed"
+        elif cmd == "pause":
+            self._cmd_pause(args)
+        elif cmd == "resume":
+            self._cmd_resume(args)
+        elif cmd == "kill":
+            self._cmd_kill(args)
+        elif cmd == "cancel":
+            self._cmd_cancel(args)
         elif cmd == "help" or cmd == "h":
             self._cmd_help()
         elif cmd == "quit" or cmd == "q":
@@ -259,7 +267,67 @@ class TUIController:
 
     def _cmd_help(self):
         """Handle :help command"""
-        self.state.message = "Commands: :queue [status] | :status <task_id> | :results [task_id] | :submit <desc> | :refresh | :help | :quit"
+        self.state.message = "Commands: :queue [status] | :status <task_id> | :results [task_id] | :submit <desc> | :pause/:resume/:kill/:cancel [task_id] | :refresh | :help | :quit"
+
+    def _cmd_pause(self, args):
+        """Handle :pause [task_id] command"""
+        if args:
+            task_id = args[0]
+            # Find task in list and select it
+            for idx, row in enumerate(self.state.tasks):
+                if row.task_id == task_id:
+                    self.state.selected_index = idx
+                    self.load_selected_task_details()
+                    self.pause_selected_task()
+                    return
+            self.state.message = f"Task not found: {task_id}"
+        else:
+            self.pause_selected_task()
+
+    def _cmd_resume(self, args):
+        """Handle :resume [task_id] command"""
+        if args:
+            task_id = args[0]
+            # Find task in list and select it
+            for idx, row in enumerate(self.state.tasks):
+                if row.task_id == task_id:
+                    self.state.selected_index = idx
+                    self.load_selected_task_details()
+                    self.resume_selected_task()
+                    return
+            self.state.message = f"Task not found: {task_id}"
+        else:
+            self.resume_selected_task()
+
+    def _cmd_kill(self, args):
+        """Handle :kill [task_id] command"""
+        if args:
+            task_id = args[0]
+            # Find task in list and select it
+            for idx, row in enumerate(self.state.tasks):
+                if row.task_id == task_id:
+                    self.state.selected_index = idx
+                    self.load_selected_task_details()
+                    self.kill_selected_task()
+                    return
+            self.state.message = f"Task not found: {task_id}"
+        else:
+            self.kill_selected_task()
+
+    def _cmd_cancel(self, args):
+        """Handle :cancel [task_id] command"""
+        if args:
+            task_id = args[0]
+            # Find task in list and select it
+            for idx, row in enumerate(self.state.tasks):
+                if row.task_id == task_id:
+                    self.state.selected_index = idx
+                    self.load_selected_task_details()
+                    self.reject_selected_task()
+                    return
+            self.state.message = f"Task not found: {task_id}"
+        else:
+            self.reject_selected_task()
 
     # ----- Phase 3 actions: submit/approve/reject -----
 
@@ -365,4 +433,80 @@ class TUIController:
             # Refresh immediately
             self.refresh_tasks()
         except Exception as e:
+            self.logger.error(f"TUI: cancel {task.task_id} failed: {e}")
             self.state.message = f"Reject failed: {e}"
+
+    def pause_selected_task(self):
+        """Pause the currently selected RUNNING task."""
+        if not self.state.tasks:
+            self.state.message = "No task selected"
+            return
+
+        row = self.state.tasks[self.state.selected_index]
+        task = self.queue.get_task(row.task_id)
+        if not task:
+            self.state.message = f"Task not found: {row.task_id}"
+            return
+
+        if task.status != TaskStatus.RUNNING.value:
+            self.state.message = "Pause: only RUNNING tasks can be paused"
+            return
+
+        try:
+            self.agent.pause_task(task.task_id)
+            self.logger.info(f"TUI: paused {task.task_id}")
+            self.state.message = f"Paused {task.task_id}"
+            self.refresh_tasks()
+        except Exception as e:
+            self.logger.error(f"TUI: pause {task.task_id} failed: {e}")
+            self.state.message = f"Pause failed: {e}"
+
+    def resume_selected_task(self):
+        """Resume the currently selected PAUSED task."""
+        if not self.state.tasks:
+            self.state.message = "No task selected"
+            return
+
+        row = self.state.tasks[self.state.selected_index]
+        task = self.queue.get_task(row.task_id)
+        if not task:
+            self.state.message = f"Task not found: {row.task_id}"
+            return
+
+        if task.status != TaskStatus.PAUSED.value:
+            self.state.message = "Resume: only PAUSED tasks can be resumed"
+            return
+
+        try:
+            self.agent.resume_task(task.task_id)
+            self.logger.info(f"TUI: resumed {task.task_id}")
+            self.state.message = f"Resumed {task.task_id}"
+            self.refresh_tasks()
+        except Exception as e:
+            self.logger.error(f"TUI: resume {task.task_id} failed: {e}")
+            self.state.message = f"Resume failed: {e}"
+
+    def kill_selected_task(self):
+        """Kill the currently selected RUNNING or PAUSED task."""
+        if not self.state.tasks:
+            self.state.message = "No task selected"
+            return
+
+        row = self.state.tasks[self.state.selected_index]
+        task = self.queue.get_task(row.task_id)
+        if not task:
+            self.state.message = f"Task not found: {row.task_id}"
+            return
+
+        if task.status not in (TaskStatus.RUNNING.value, TaskStatus.PAUSED.value):
+            self.state.message = "Kill: only RUNNING/PAUSED tasks can be killed"
+            return
+
+        try:
+            self.agent.kill_task(task.task_id)
+            self.logger.info(f"TUI: killed {task.task_id}")
+            self.state.message = f"Killed {task.task_id}"
+            self.refresh_tasks()
+        except Exception as e:
+            self.logger.error(f"TUI: kill {task.task_id} failed: {e}")
+            self.state.message = f"Kill failed: {e}"

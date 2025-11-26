@@ -122,6 +122,27 @@ def create_keybindings(state: UIState, controller, cmd_widget) -> KeyBindings:
         controller.reject_selected_task()
         get_app().invalidate()
 
+    # Pause running task
+    @kb.add('p', filter=is_normal_mode)
+    def _(event):
+        """Pause selected running task"""
+        controller.pause_selected_task()
+        get_app().invalidate()
+
+    # Resume paused task
+    @kb.add('P', filter=is_normal_mode)
+    def _(event):
+        """Resume selected paused task"""
+        controller.resume_selected_task()
+        get_app().invalidate()
+
+    # Kill running/paused task
+    @kb.add('X', filter=is_normal_mode)
+    def _(event):
+        """Kill selected running/paused task"""
+        controller.kill_selected_task()
+        get_app().invalidate()
+
     # Submit new task (vim editor)
     @kb.add('s', filter=is_normal_mode)
     def _(event):
