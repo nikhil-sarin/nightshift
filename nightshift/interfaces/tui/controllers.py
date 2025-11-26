@@ -305,6 +305,7 @@ class TUIController:
                     self.agent.execute_task(task)
 
             except Exception as e:
+                self.logger.error(f"TUI: submit task failed: {e}")
                 self.state.message = f"Submit failed: {e}"
 
         label = "Planning task..." if not auto_approve else "Planning & executing..."
