@@ -82,6 +82,9 @@ def create_app() -> Application:
 
         # Error codeblock style
         "error-codeblock": "fg:ansired",
+
+        # Execution log styles
+        "arg-key": "fg:ansibrightblack italic",
     })
 
     # Create application

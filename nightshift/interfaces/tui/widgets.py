@@ -145,11 +145,16 @@ class DetailControl(FormattedTextControl):
                 # Parse and colorize execution log
                 for line in st.exec_snippet.split("\n"):
                     if line.startswith("🔧"):
+                        # Tool calls - dim
                         lines.append(("class:dim", line + "\n"))
                     elif line.startswith("✅"):
+                        # Success messages - green
                         lines.append(("green", line + "\n"))
+                    elif line.startswith("  ") and ":" in line and not line.startswith("    "):
+                        # Argument keys (2-space indent with colon) - use dim italic
+                        lines.append(("class:arg-key", line + "\n"))
                     elif line.strip():
-                        # Claude's text - default color
+                        # Claude's text and content - default color
                         lines.append(("", line + "\n"))
                     else:
                         lines.append(("", line + "\n"))
