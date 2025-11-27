@@ -4,6 +4,7 @@ Determines which tools are needed and generates appropriate prompts
 """
 import subprocess
 import json
+import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -145,11 +146,18 @@ Guidelines:
                 "--json-schema", json_schema
             ]
 
+            # Prepare environment without ANTHROPIC_API_KEY to use Claude Pro authentication
+            env = dict(os.environ)
+            if 'ANTHROPIC_API_KEY' in env:
+                del env['ANTHROPIC_API_KEY']
+                self.logger.info("Removed ANTHROPIC_API_KEY from subprocess environment to use Claude Pro authentication")
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=timeout
+                timeout=timeout,
+                env=env
             )
 
             if result.returncode != 0:
@@ -295,11 +303,17 @@ Guidelines:
                 "--json-schema", json_schema
             ]
 
+            # Prepare environment without ANTHROPIC_API_KEY to use Claude Pro authentication
+            env = dict(os.environ)
+            if 'ANTHROPIC_API_KEY' in env:
+                del env['ANTHROPIC_API_KEY']
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=30,
+                env=env
             )
 
             if result.returncode != 0:

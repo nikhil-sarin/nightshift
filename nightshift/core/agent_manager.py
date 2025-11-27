@@ -92,6 +92,13 @@ class AgentManager:
             # Set up environment variables
             env = dict(os.environ)
 
+            # Remove ANTHROPIC_API_KEY to ensure Claude CLI uses Claude Pro account authentication
+            # instead of API key authentication. NightShift should leverage the user's Pro account
+            # for all task executions.
+            if 'ANTHROPIC_API_KEY' in env:
+                del env['ANTHROPIC_API_KEY']
+                self.logger.info("Removed ANTHROPIC_API_KEY from subprocess environment to use Claude Pro authentication")
+
             # If needs_git, try to get gh token for sandbox compatibility
             if task.needs_git:
                 # Try to get gh token from gh CLI
