@@ -293,6 +293,7 @@ class TaskQueue:
         description: str,
         allowed_tools: Optional[List[str]] = None,
         allowed_directories: Optional[List[str]] = None,
+        needs_git: Optional[bool] = None,
         system_prompt: Optional[str] = None,
         estimated_tokens: Optional[int] = None,
         estimated_time: Optional[int] = None
@@ -309,6 +310,7 @@ class TaskQueue:
                     description = ?,
                     allowed_tools = ?,
                     allowed_directories = ?,
+                    needs_git = ?,
                     system_prompt = ?,
                     estimated_tokens = ?,
                     estimated_time = ?,
@@ -318,6 +320,7 @@ class TaskQueue:
                     description,
                     json.dumps(allowed_tools) if allowed_tools else None,
                     json.dumps(allowed_directories) if allowed_directories else None,
+                    1 if needs_git else 0,
                     system_prompt,
                     estimated_tokens,
                     estimated_time,

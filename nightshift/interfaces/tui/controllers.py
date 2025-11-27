@@ -674,3 +674,100 @@ class TUIController:
         self.logger.info(f"TUI: deleted {task_id}")
         self.state.message = f"Deleted {task_id}"
         self.refresh_tasks()
+
+    def review_selected_task(self):
+        """Review/edit selected STAGED task"""
+        if not self.state.tasks:
+            return
+
+        row = self.state.tasks[self.state.selected_index]
+        task = self.queue.get_task(row.task_id)
+
+        if task.status != TaskStatus.STAGED.value:
+            self.state.message = "Review: only STAGED tasks can be edited"
+            return
+
+        def open_editor_and_refine():
+            import os
+            import tempfile
+            import subprocess
+            from pathlib import Path
+
+            # Create temp file with current task details as comments
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                # Put current description at top for editing
+                f.write(task.description + "\n\n")
+                f.write("# Review and edit the task description above\n")
+                f.write("# Original task details shown below (read-only reference):\n")
+                f.write(f"# Task ID: {task.task_id}\n")
+                f.write(f"# Status: {task.status}\n")
+                if task.allowed_tools:
+                    f.write(f"# Allowed Tools: {', '.join(task.allowed_tools)}\n")
+                if task.allowed_directories:
+                    f.write(f"# Allowed Directories: {', '.join(task.allowed_directories)}\n")
+                if task.system_prompt:
+                    f.write(f"# System Prompt: {task.system_prompt[:200]}...\n")
+                f.write(f"# Estimated Tokens: {task.estimated_tokens}\n")
+                f.write(f"# Estimated Time: {task.estimated_time}s\n")
+                f.write("#\n")
+                f.write("# Save and quit to submit changes, or quit without saving to cancel\n")
+                temp_path = f.name
+
+            # Open editor
+            editor = os.environ.get('EDITOR', 'vim')
+            subprocess.run([editor, temp_path], check=False)
+
+            # Read edited content
+            with open(temp_path, 'r') as f:
+                lines = f.readlines()
+
+            # Filter out comments and empty lines
+            edited_lines = [line for line in lines if line.strip() and not line.strip().startswith('#')]
+            edited_desc = ''.join(edited_lines).strip()
+
+            Path(temp_path).unlink()
+
+            # If unchanged or empty, cancel
+            if not edited_desc or edited_desc == task.description:
+                self.state.message = "Review cancelled: no changes made"
+                return
+
+            # User changed the description - refine the plan
+            self.state.message = f"Refining plan for {task.task_id}..."
+
+            # Build current plan dict
+            current_plan = {
+                "enhanced_prompt": task.description,
+                "allowed_tools": task.allowed_tools or [],
+                "allowed_directories": task.allowed_directories or [],
+                "needs_git": task.needs_git or False,
+                "system_prompt": task.system_prompt or "",
+                "estimated_tokens": task.estimated_tokens or 0,
+                "estimated_time": task.estimated_time or 0,
+            }
+
+            # Refine plan with new description as feedback
+            refined_plan = self.planner.refine_plan(current_plan, edited_desc)
+
+            # Update the task
+            success = self.queue.update_plan(
+                task.task_id,
+                description=refined_plan.get("enhanced_prompt", edited_desc),
+                allowed_tools=refined_plan.get("allowed_tools", []),
+                allowed_directories=refined_plan.get("allowed_directories", []),
+                needs_git=refined_plan.get("needs_git", False),
+                system_prompt=refined_plan.get("system_prompt", ""),
+                estimated_tokens=refined_plan.get("estimated_tokens"),
+                estimated_time=refined_plan.get("estimated_time"),
+            )
+
+            if success:
+                self.logger.info(f"TUI: refined plan for {task.task_id}")
+                self.state.message = f"Updated {task.task_id}"
+            else:
+                self.state.message = f"Failed to update {task.task_id}"
+
+            self.refresh_tasks()
+
+        from prompt_toolkit.application import run_in_terminal
+        run_in_terminal(open_editor_and_refine)
