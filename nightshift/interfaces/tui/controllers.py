@@ -698,9 +698,10 @@ class TUIController:
                 # Blank area for user feedback at top
                 f.write("\n\n\n")
 
-                # Original plan details at bottom
-                f.write("# ---------- ORIGINAL PLAN ----------\n")
+                # Instruction line
                 f.write("# Write your feedback/changes above\n")
+                f.write("#\n")
+                f.write("# ---------- ORIGINAL PLAN ----------\n")
                 f.write("#\n")
                 f.write("# Description:\n")
                 for line in task.description.splitlines():
@@ -739,8 +740,9 @@ class TUIController:
                 self.state.message = "Review cancelled: no feedback provided"
                 return
 
-            # User provided feedback - refine the plan
+            # Show message immediately and kick off background refinement
             self.state.message = f"Refining plan for {task.task_id}..."
+            get_app().invalidate()
 
             # Build current plan dict
             current_plan = {
@@ -753,28 +755,41 @@ class TUIController:
                 "estimated_time": task.estimated_time or 0,
             }
 
-            # Refine plan based on user feedback
-            refined_plan = self.planner.refine_plan(current_plan, feedback)
+            # Run planner in background thread to avoid blocking TUI
+            def refine_in_background():
+                try:
+                    # Refine plan based on user feedback
+                    refined_plan = self.planner.refine_plan(current_plan, feedback)
 
-            # Update the task
-            success = self.queue.update_plan(
-                task.task_id,
-                description=refined_plan.get("enhanced_prompt", task.description),
-                allowed_tools=refined_plan.get("allowed_tools", []),
-                allowed_directories=refined_plan.get("allowed_directories", []),
-                needs_git=refined_plan.get("needs_git", False),
-                system_prompt=refined_plan.get("system_prompt", ""),
-                estimated_tokens=refined_plan.get("estimated_tokens"),
-                estimated_time=refined_plan.get("estimated_time"),
-            )
+                    # Update the task
+                    success = self.queue.update_plan(
+                        task.task_id,
+                        description=refined_plan.get("enhanced_prompt", task.description),
+                        allowed_tools=refined_plan.get("allowed_tools", []),
+                        allowed_directories=refined_plan.get("allowed_directories", []),
+                        needs_git=refined_plan.get("needs_git", False),
+                        system_prompt=refined_plan.get("system_prompt", ""),
+                        estimated_tokens=refined_plan.get("estimated_tokens"),
+                        estimated_time=refined_plan.get("estimated_time"),
+                    )
 
-            if success:
-                self.logger.info(f"TUI: refined plan for {task.task_id}")
-                self.state.message = f"Updated {task.task_id}"
-            else:
-                self.state.message = f"Failed to update {task.task_id}"
+                    if success:
+                        self.logger.info(f"TUI: refined plan for {task.task_id}")
+                        self.state.message = f"Updated {task.task_id}"
+                    else:
+                        self.state.message = f"Failed to update {task.task_id}"
 
-            self.refresh_tasks()
+                    self.refresh_tasks()
+                    get_app().invalidate()
+
+                except Exception as e:
+                    self.logger.error(f"TUI: plan refinement failed: {e}")
+                    self.state.message = f"Refinement failed: {str(e)}"
+                    get_app().invalidate()
+
+            import threading
+            thread = threading.Thread(target=refine_in_background, daemon=True)
+            thread.start()
 
         from prompt_toolkit.application import run_in_terminal
         run_in_terminal(open_editor_and_refine)
