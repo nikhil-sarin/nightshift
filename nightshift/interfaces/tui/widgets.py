@@ -145,12 +145,12 @@ class DetailControl(FormattedTextControl):
                 # Parse and colorize execution log
                 for line in st.exec_snippet.split("\n"):
                     if line.startswith("🔧"):
-                        lines.append(("yellow", line + "\n"))
+                        lines.append(("class:dim", line + "\n"))
                     elif line.startswith("✅"):
                         lines.append(("green", line + "\n"))
                     elif line.strip():
-                        # Claude's text - use cyan
-                        lines.append(("cyan", line + "\n"))
+                        # Claude's text - default color
+                        lines.append(("", line + "\n"))
                     else:
                         lines.append(("", line + "\n"))
             else:
