@@ -92,6 +92,15 @@ class AgentManager:
             # Set up environment variables
             env = dict(os.environ)
 
+            # Debug: Log ALL environment variables to see what's available
+            self.logger.info("=" * 80)
+            self.logger.info("FULL ENVIRONMENT DUMP:")
+            for k, v in sorted(env.items()):
+                # Truncate long values but show keys
+                display_val = v[:50] + "..." if len(v) > 50 else v
+                self.logger.info(f"  {k} = {display_val}")
+            self.logger.info("=" * 80)
+
             # Debug: Log all auth-related environment variables
             auth_vars = {k: v[:20] + "..." if len(v) > 20 else v
                         for k, v in env.items()
