@@ -30,6 +30,10 @@ class SelectedTaskState:
     summary_info: Optional[dict] = None  # parsed _notification.json
     last_loaded: Optional[datetime] = None
 
+    # Cached log file metadata to detect changes efficiently
+    log_mtime: Optional[float] = None
+    log_size: Optional[int] = None
+
 
 @dataclass
 class UIState:
@@ -55,7 +59,18 @@ class UIState:
 
 def task_to_row(task) -> TaskRow:
     """Convert a Task object to a TaskRow for display"""
-    status_upper = task.status.upper()
+    from nightshift.core.task_queue import TaskStatus
+
+    # Normalize status once
+    raw_status = getattr(task, "status", None)
+    if isinstance(raw_status, TaskStatus):
+        status = raw_status.value  # "staged", "running", ...
+    elif isinstance(raw_status, str):
+        status = raw_status.lower()
+    else:
+        status = str(raw_status or "").lower()
+
+    status_upper = status.upper()
     emoji_map = {
         "STAGED": "📝",
         "COMMITTED": "✔️",
@@ -76,9 +91,9 @@ def task_to_row(task) -> TaskRow:
     }
     return TaskRow(
         task_id=task.task_id,
-        status=task.status,
+        status=status,
         description=task.description,
         created_at=task.created_at,
         status_emoji=emoji_map.get(status_upper, "❓"),
-        status_color=color_map.get(task.status, "white"),
+        status_color=color_map.get(status, "white"),
     )

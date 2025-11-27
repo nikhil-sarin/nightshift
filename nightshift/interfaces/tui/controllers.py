@@ -249,49 +249,144 @@ class TUIController:
         row = self.state.tasks[self.state.selected_index]
         st = self.state.selected_task
 
-        # Only reload if we selected a different task
+        # If we've selected a different task, reload everything
         if st.task_id != row.task_id:
             task = self.queue.get_task(row.task_id)
-            if task:
-                st.task_id = row.task_id
-                st.details = task.to_dict()
-                st.exec_snippet = self._load_exec_snippet(task)
-                st.files_info = self._load_files_info(task)
-                st.summary_info = self._load_summary_info(task)
+            if not task:
+                self.state.selected_task = SelectedTaskState()
+                return
+
+            st.task_id = row.task_id
+            st.details = task.to_dict()
+            # Full load: snippet + metadata
+            st.exec_snippet, st.log_mtime, st.log_size = self._load_exec_snippet(task)
+            st.files_info = self._load_files_info(task)
+            st.summary_info = self._load_summary_info(task)
+            st.last_loaded = datetime.utcnow()
+            return
+
+        # Same task still selected: maybe update details and exec log
+        task = self.queue.get_task(row.task_id)
+        if not task:
+            return
+
+        # Always update details so status and timestamps stay current
+        st.details = task.to_dict()
+
+        # Normalize status to lower-case string for comparisons
+        raw_status = getattr(task, "status", None)
+        if isinstance(raw_status, TaskStatus):
+            status = raw_status.value  # e.g. "running"
+        elif isinstance(raw_status, str):
+            status = raw_status.lower()
+        else:
+            status = str(raw_status or "").lower()
+
+        if status == TaskStatus.RUNNING.value:
+            # For RUNNING tasks, reload exec snippet when the file changes
+            st.exec_snippet, st.log_mtime, st.log_size = self._maybe_reload_exec_snippet(
+                task,
+                prev_mtime=st.log_mtime,
+                prev_size=st.log_size,
+                current_snippet=st.exec_snippet,
+            )
+            st.last_loaded = datetime.utcnow()
+        else:
+            # For non-running tasks, load exec snippet only once
+            if not st.exec_snippet:
+                st.exec_snippet, st.log_mtime, st.log_size = self._load_exec_snippet(task)
                 st.last_loaded = datetime.utcnow()
 
-    def _load_exec_snippet(self, task) -> str:
-        """Load formatted execution log snippet for the task."""
-        if not getattr(task, "result_path", None):
-            return ""
+    def _load_exec_snippet(self, task):
+        """
+        Load formatted execution log snippet for the task.
 
-        path = Path(task.result_path)
+        Returns:
+            (snippet: str, mtime: float|None, size: int|None)
+        """
+        result_path = getattr(task, "result_path", None)
+        if not result_path:
+            return "", None, None
+
+        path = Path(result_path)
         if not path.exists():
-            return ""
+            return "", None, None
 
+        try:
+            stat = path.stat()
+            mtime = stat.st_mtime
+            size = stat.st_size
+        except OSError:
+            return "", None, None
+
+        # Read data defensively; writer may be updating the file
         try:
             with path.open("r") as f:
                 data = json.load(f)
         except Exception:
-            return ""
+            # If the file is mid-write / partially valid, skip this cycle
+            return "", mtime, size
 
         stdout = data.get("stdout", "")
         if not stdout:
-            return ""
+            return "", mtime, size
 
         # First try formatted view
         try:
-            formatted = format_exec_log_from_result(task.result_path, max_lines=200)
+            formatted = format_exec_log_from_result(result_path, max_lines=200)
         except Exception:
             formatted = ""
 
         if formatted:
-            return formatted
+            return formatted, mtime, size
 
         # Fallback: raw tail (old behavior)
         lines = stdout.strip().splitlines()
         tail = lines[-40:]
-        return "\n".join(tail)
+        return "\n".join(tail), mtime, size
+
+    def _maybe_reload_exec_snippet(
+        self,
+        task,
+        prev_mtime: float,
+        prev_size: int,
+        current_snippet: str,
+    ):
+        """
+        Only reload exec snippet if the log file has changed.
+
+        Returns:
+            (snippet: str, mtime: float|None, size: int|None)
+        """
+        result_path = getattr(task, "result_path", None)
+        if not result_path:
+            return current_snippet, None, None
+
+        path = Path(result_path)
+        if not path.exists():
+            return current_snippet, None, None
+
+        try:
+            stat = path.stat()
+        except OSError:
+            return current_snippet, prev_mtime, prev_size
+
+        mtime = stat.st_mtime
+        size = stat.st_size
+
+        # If we've seen this file before and nothing changed, keep current snippet
+        if prev_mtime is not None and prev_size is not None:
+            if mtime == prev_mtime and size == prev_size:
+                return current_snippet, prev_mtime, prev_size
+
+        # Something changed (or we never had metadata), reload
+        new_snippet, new_mtime, new_size = self._load_exec_snippet(task)
+
+        # If reload failed / empty snippet but file changed, keep old snippet and update metadata
+        if not new_snippet:
+            return current_snippet, mtime, size
+
+        return new_snippet, new_mtime, new_size
 
     def _load_files_info(self, task) -> dict:
         """Load file changes info"""
