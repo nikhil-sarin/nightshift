@@ -39,7 +39,33 @@ nightshift clear
 ```
 
 ### Testing
-Note: No formal test suite exists yet. Manual testing is done via the CLI commands above.
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/test_controller_exec_log.py
+
+# Run with verbose output
+pytest -v
+
+# Run with coverage (if installed)
+pytest --cov=nightshift
+```
+
+**Test Suite Structure:**
+- `tests/conftest.py`: Mock fixtures (DummyQueue, DummyConfig, DummyPlanner, DummyAgent, DummyLogger)
+- `tests/test_controller_exec_log.py`: Controller exec log loading and real-time updates (9 tests)
+- `tests/test_exec_log_formatting.py`: Helper function tests for formatting and text extraction (13 tests)
+- `tests/test_controller_files_summary.py`: File tracking and summary loading (6 tests)
+
+**Current Coverage:** 28 tests covering TUI controller logic and helpers with mocked backends.
+
+**Testing Strategy:**
+1. Step 1 (✅ Complete): Controller unit tests with mocked backends
+2. Step 2 (Pending): Widget rendering tests
+3. Step 3 (Pending): Minimal integration tests with prompt_toolkit
 
 ## Architecture
 
