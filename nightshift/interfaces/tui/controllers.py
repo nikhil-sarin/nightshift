@@ -759,7 +759,7 @@ class TUIController:
             # Update the task
             success = self.queue.update_plan(
                 task.task_id,
-                description=refined_plan.get("enhanced_prompt", edited_desc),
+                description=refined_plan.get("enhanced_prompt", task.description),
                 allowed_tools=refined_plan.get("allowed_tools", []),
                 allowed_directories=refined_plan.get("allowed_directories", []),
                 needs_git=refined_plan.get("needs_git", False),
