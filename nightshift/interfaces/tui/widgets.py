@@ -2,6 +2,7 @@
 TUI Widgets
 prompt_toolkit UI components for NightShift
 """
+import json
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout import Window
 from .models import UIState
@@ -140,9 +141,47 @@ class DetailControl(FormattedTextControl):
                 lines.append(("class:dim", f"{snippet}\n"))
 
         elif tab == "exec":
-            lines.append(("bold", "Execution Log\n\n"))
+            lines.append(("class:heading", "📋 Execution Log\n\n"))
             if st.exec_snippet:
-                lines.append(("", st.exec_snippet + "\n"))
+                # Parse stream-json output and format nicely
+                for line in st.exec_snippet.split("\n"):
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    try:
+                        event = json.loads(line)
+                        event_type = event.get("type", "")
+
+                        # Text content from Claude
+                        if event_type == "content_block_delta":
+                            delta = event.get("delta", {})
+                            if delta.get("type") == "text_delta":
+                                text = delta.get("text", "")
+                                lines.append(("", text))
+
+                        # Tool use events
+                        elif event_type == "content_block_start":
+                            content = event.get("content_block", {})
+                            if content.get("type") == "tool_use":
+                                tool_name = content.get("name", "")
+                                lines.append(("cyan", f"\n🔧 {tool_name}\n"))
+
+                        # Message start/stop
+                        elif event_type == "message_start":
+                            lines.append(("class:dim", "--- Message Start ---\n"))
+                        elif event_type == "message_stop":
+                            lines.append(("class:dim", "\n--- Message Stop ---\n"))
+
+                        # Errors
+                        elif event_type == "error":
+                            err_msg = event.get("error", {}).get("message", str(event))
+                            lines.append(("red", f"\n❌ Error: {err_msg}\n"))
+
+                    except json.JSONDecodeError:
+                        # Not JSON, might be plain text output
+                        if line:
+                            lines.append(("class:dim", f"{line}\n"))
             else:
                 lines.append(("class:dim", "No execution log available\n"))
 
