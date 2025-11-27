@@ -26,7 +26,12 @@ def create_app() -> Application:
     logger = NightShiftLogger(log_dir=str(cfg.get_log_dir()), console_output=False)
     queue = TaskQueue(db_path=str(cfg.get_database_path()))
     planner = TaskPlanner(logger, tools_reference_path=str(cfg.get_tools_reference_path()))
-    agent = AgentManager(queue, logger, output_dir=str(cfg.get_output_dir()))
+    agent = AgentManager(
+        queue,
+        logger,
+        output_dir=str(cfg.get_output_dir()),
+        enable_terminal_notifications=False  # Disable terminal output in TUI mode
+    )
 
     # Initialize UI state
     state = UIState()

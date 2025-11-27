@@ -2,6 +2,7 @@
 TUI Keybindings
 Vi-style keymaps for NightShift
 """
+import os
 import tempfile
 import subprocess
 from pathlib import Path
@@ -154,13 +155,15 @@ def create_keybindings(state: UIState, controller, cmd_widget) -> KeyBindings:
         def open_vim_and_submit():
             # Create temporary file with helpful template
             with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                f.write("# Describe your task below (lines starting with # are ignored)\n")
-                f.write("# Save and quit (:wq) to submit, or quit without saving (:q!) to cancel\n\n")
+                f.write("\n\n")
+                f.write("# Describe your task above (lines starting with # are ignored)\n")
+                f.write("# Save and quit (:wq) to submit, or quit without saving (:q!) to cancel\n")
                 temp_path = f.name
 
             try:
-                # Open vim
-                result = subprocess.run(['vim', temp_path], check=False)
+                # Open editor (respects $EDITOR, defaults to vim)
+                editor = os.environ.get('EDITOR', 'vim')
+                result = subprocess.run([editor, temp_path], check=False)
 
                 # Read the content
                 with open(temp_path, 'r') as f:
