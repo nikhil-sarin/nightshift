@@ -117,16 +117,24 @@ def format_exec_log_from_result(result_path: str, max_lines: int = 200) -> str:
                 elif btype == "tool_use":
                     name = block.get("name") or "<tool>"
                     args = block.get("input") or {}
-                    # For Bash, show the command; for other tools, show full args
-                    if name == "Bash" and "command" in args:
-                        cmd = args["command"]
-                        lines_out.append(f"🔧 {name}: {cmd}")
+
+                    if not args:
+                        lines_out.append(f"🔧 {name}")
                     else:
-                        args_preview = repr(args)
-                        if args:
-                            lines_out.append(f"🔧 {name}: {args_preview}")
-                        else:
-                            lines_out.append(f"🔧 {name}")
+                        # Show tool name
+                        lines_out.append(f"🔧 {name}:")
+                        # Show each argument nicely formatted
+                        for key, value in args.items():
+                            if isinstance(value, str) and len(value) > 100:
+                                # Multi-line string values (like file content)
+                                lines_out.append(f"  {key}:")
+                                for line in value.split('\n')[:50]:  # Limit to 50 lines
+                                    lines_out.append(f"    {line}")
+                                if value.count('\n') > 50:
+                                    lines_out.append(f"    ... ({value.count(chr(10)) - 50} more lines)")
+                            else:
+                                # Short values on one line
+                                lines_out.append(f"  {key}: {value}")
             continue
 
         # Direct text events
@@ -141,16 +149,24 @@ def format_exec_log_from_result(result_path: str, max_lines: int = 200) -> str:
         if etype == "tool_use":
             name = event.get("name") or "<tool>"
             args = event.get("input") or {}
-            # For Bash, show the command; for other tools, show full args
-            if name == "Bash" and "command" in args:
-                cmd = args["command"]
-                lines_out.append(f"🔧 {name}: {cmd}")
+
+            if not args:
+                lines_out.append(f"🔧 {name}")
             else:
-                args_preview = repr(args)
-                if args:
-                    lines_out.append(f"🔧 {name}: {args_preview}")
-                else:
-                    lines_out.append(f"🔧 {name}")
+                # Show tool name
+                lines_out.append(f"🔧 {name}:")
+                # Show each argument nicely formatted
+                for key, value in args.items():
+                    if isinstance(value, str) and len(value) > 100:
+                        # Multi-line string values (like file content)
+                        lines_out.append(f"  {key}:")
+                        for line in value.split('\n')[:50]:  # Limit to 50 lines
+                            lines_out.append(f"    {line}")
+                        if value.count('\n') > 50:
+                            lines_out.append(f"    ... ({value.count(chr(10)) - 50} more lines)")
+                    else:
+                        # Short values on one line
+                        lines_out.append(f"  {key}: {value}")
             continue
 
         # Final result event
