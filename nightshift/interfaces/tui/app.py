@@ -101,11 +101,8 @@ def create_app() -> Application:
         """Periodically refresh the task list"""
         while True:
             await asyncio.sleep(2)
-            try:
-                controller.refresh_tasks()
-                app.invalidate()
-            except Exception as e:
-                logger.error(f"Auto-refresh failed: {e}")
+            controller.refresh_tasks()
+            app.invalidate()
 
     # Schedule auto-refresh
     app.pre_run_callables.append(
@@ -195,11 +192,8 @@ def create_app_for_test(tasks=None, tmp_path=None, disable_auto_refresh: bool = 
         async def auto_refresh():
             while True:
                 await asyncio.sleep(2)
-                try:
-                    controller.refresh_tasks()
-                    app.invalidate()
-                except Exception as e:
-                    logger.error(f"Auto-refresh failed: {e}")
+                controller.refresh_tasks()
+                app.invalidate()
 
         app.pre_run_callables.append(
             lambda: app.create_background_task(auto_refresh())
