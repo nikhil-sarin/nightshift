@@ -200,11 +200,18 @@ class DetailControl(FormattedTextControl):
             else:
                 lines.append(("class:heading", "📊 Task Summary\n\n"))
 
-                # --- Status header (SUCCESS/FAILED) ---
+                # --- Status header (SUCCESS/FAILED/CANCELLED/etc) ---
                 raw_status = (info.get("status") or "").lower()
-                status_text = "SUCCESS" if raw_status == "success" else "FAILED"
-                status_emoji = "✅" if raw_status == "success" else "❌"
-                status_color = "class:success" if raw_status == "success" else "class:error"
+                if raw_status == "success":
+                    status_text, status_emoji, status_color = "SUCCESS", "✅", "class:success"
+                elif raw_status in ("failed", "error"):
+                    status_text, status_emoji, status_color = "FAILED", "❌", "class:error"
+                elif raw_status == "cancelled":
+                    status_text, status_emoji, status_color = "CANCELLED", "🚫", "class:error"
+                elif raw_status == "running":
+                    status_text, status_emoji, status_color = "RUNNING", "⏳", "cyan"
+                else:
+                    status_text, status_emoji, status_color = raw_status.upper() or "UNKNOWN", "❓", ""
 
                 header = f"{status_emoji} Task {status_text}: {info.get('task_id', st.task_id or '')}\n\n"
                 lines.append((status_color, header))
@@ -241,7 +248,10 @@ class DetailControl(FormattedTextControl):
                 lines.append(("", "\n"))
 
                 # --- What NightShift did (file changes) ---
-                fc = info.get("file_changes") or {}
+                fc = info.get("file_changes")
+                if not fc and st.files_info:
+                    fc = st.files_info
+                fc = fc or {}
                 created = fc.get("created") or []
                 modified = fc.get("modified") or []
                 deleted = fc.get("deleted") or []
@@ -330,7 +340,7 @@ class StatusBarControl(FormattedTextControl):
         else:
             text = f" {mode} | {hints}"
 
-        return [("class:status", text)]
+        return [("class:statusbar", text)]
 
 
 def create_task_list_window(state: UIState) -> Window:
