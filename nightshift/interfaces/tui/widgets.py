@@ -27,11 +27,11 @@ class TaskListControl(FormattedTextControl):
         """Generate formatted text for task list"""
         lines = []
         for i, row in enumerate(self.state.tasks):
-            selected = (i == self.state.selected_index)
+            selected = (i == self.selected_index)
             style = f"reverse {row.status_color}" if selected else row.status_color
             desc = row.description
-            if len(desc) > 40:
-                desc = desc[:37] + "..."
+            if len(desc) > 49:
+                desc = desc[:46] + "..."
             created = row.created_at.split("T")[0] if row.created_at else ""
             text = f" {row.status_emoji} {row.task_id} {desc} [{created}]"
             lines.append((style, text + "\n"))
