@@ -7,8 +7,10 @@
 **Automated Research Assistant System**
 
 [![Status](https://img.shields.io/badge/status-Phase%201%20Complete-success)](https://github.com)
-[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Tests](https://github.com/james-alvey-42/nightshift/actions/workflows/test.yml/badge.svg)](https://github.com/james-alvey-42/nightshift/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/james-alvey-42/nightshift/branch/main/graph/badge.svg)](https://codecov.io/gh/james-alvey-42/nightshift)
 [![Slack](https://img.shields.io/badge/Slack-Integration-purple)](SLACK_QUICK_START.md)
 
 *An AI-driven agent manager for scientific research automation, powered by Claude Code's headless mode and MCP tools. Now with Slack integration!*

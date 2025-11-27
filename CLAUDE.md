@@ -53,8 +53,15 @@ pytest tests/tui/test_controller_exec_log.py
 # Run with verbose output
 pytest -v
 
-# Run with coverage (if installed)
-pytest --cov=nightshift
+# Run with coverage
+pytest --cov=nightshift --cov-report=term-missing
+
+# Run with coverage and generate HTML report
+pytest --cov=nightshift --cov-report=html
+
+# Open HTML coverage report (generated in htmlcov/)
+open htmlcov/index.html  # macOS
+xdg-open htmlcov/index.html  # Linux
 ```
 
 **Test Suite Structure:**
@@ -82,7 +89,16 @@ tests/
 **CI/CD:**
 - GitHub Actions workflow in `.github/workflows/test.yml`
 - Tests run on Python 3.10, 3.11, 3.12, 3.13
+- Coverage reports uploaded to Codecov
 - Triggered on push to main and feature/* branches, and on pull requests
+
+**Coverage:**
+- Current TUI coverage: ~26% overall
+  - widgets.py: 90%+
+  - models.py: 95%+
+  - layout.py: 100%
+- Configuration in `pyproject.toml` under `[tool.coverage.*]`
+- HTML reports generated in `htmlcov/` directory
 
 ## Architecture
 
