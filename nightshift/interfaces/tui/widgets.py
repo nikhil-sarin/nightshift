@@ -67,7 +67,7 @@ class DetailControl(FormattedTextControl):
         for i, (key, name) in enumerate(tab_names):
             is_active = tab_values[i] == tab
             if is_active:
-                lines.append(("reverse", f" {key}:{name} "))
+                lines.append(("class:tab-active", f" {key}:{name} "))
             else:
                 lines.append(("class:dim", f" {key}:{name} "))
         lines.append(("", "\n\n"))

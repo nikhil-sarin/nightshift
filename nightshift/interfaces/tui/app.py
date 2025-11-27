@@ -66,6 +66,9 @@ def create_app() -> Application:
         "red": "fg:ansired",
         "ansired": "fg:ansired",
 
+        # Tab styles
+        "tab-active": "fg:ansiwhite bold",
+
         # New detail panel helpers
         "heading": "bold underline",
         "section-title": "bold fg:ansicyan",
@@ -165,6 +168,7 @@ def create_app_for_test(tasks=None, tmp_path=None, disable_auto_refresh: bool = 
         "green": "fg:ansigreen",
         "red": "fg:ansired",
         "ansired": "fg:ansired",
+        "tab-active": "fg:ansiwhite bold",
         "heading": "bold underline",
         "section-title": "bold fg:ansicyan",
         "success": "fg:ansigreen bold",
