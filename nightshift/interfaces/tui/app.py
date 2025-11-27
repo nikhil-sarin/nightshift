@@ -52,35 +52,35 @@ def create_app() -> Application:
     # Create keybindings
     key_bindings = create_keybindings(state, controller, cmd_widget)
 
-    # Define style
+    # Define style - use terminal color palette
     style = Style.from_dict({
         "statusbar": "reverse",
-        "separator": "",
-        "dim": "",
-        "yellow": "",
-        "blue": "",
-        "cyan": "",
-        "magenta": "",
-        "green": "",
-        "red": "",
-        "ansired": "",
+        "separator": "fg:ansibrightblack",
+        "dim": "fg:ansibrightblack",
+        "yellow": "fg:ansiyellow",
+        "blue": "fg:ansiblue",
+        "cyan": "fg:ansicyan",
+        "magenta": "fg:ansimagenta",
+        "green": "fg:ansigreen",
+        "red": "fg:ansired",
+        "ansired": "fg:ansired",
 
         # New detail panel helpers
         "heading": "bold underline",
-        "section-title": "bold",
-        "success": "bold",
-        "error": "bold",
+        "section-title": "bold fg:ansicyan",
+        "success": "fg:ansigreen bold",
+        "error": "fg:ansired bold",
 
         # File change styles
-        "file-created-title": "bold",
-        "file-modified-title": "bold",
-        "file-deleted-title": "bold",
-        "file-created": "",
-        "file-modified": "",
-        "file-deleted": "",
+        "file-created-title": "bold fg:ansigreen",
+        "file-modified-title": "bold fg:ansiyellow",
+        "file-deleted-title": "bold fg:ansired",
+        "file-created": "fg:ansigreen",
+        "file-modified": "fg:ansiyellow",
+        "file-deleted": "fg:ansired",
 
         # Error codeblock style
-        "error-codeblock": "",
+        "error-codeblock": "fg:ansired",
     })
 
     # Create application
