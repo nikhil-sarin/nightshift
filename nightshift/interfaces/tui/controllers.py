@@ -64,7 +64,11 @@ def format_exec_log_from_result(result_path: str, max_lines: int = 200) -> str:
     """
     Parse stream-json 'stdout' and render a human-readable execution log.
 
-    Shows Claude's text, tool calls, and tool outputs in a readable format.
+    Matches NightShift's actual event structure (same as CLI watch and Slack):
+      - type == 'assistant' with message.content blocks
+      - type == 'text'
+      - type == 'tool_use'
+      - type == 'result'
     """
     if not result_path:
         return ""
@@ -84,17 +88,6 @@ def format_exec_log_from_result(result_path: str, max_lines: int = 200) -> str:
         return ""
 
     lines_out = []
-    current_assistant_buffer = []
-
-    def flush_assistant():
-        if current_assistant_buffer:
-            text = "".join(current_assistant_buffer).strip()
-            if text:
-                lines_out.append("Claude:")
-                for ln in text.splitlines():
-                    lines_out.append(f"  {ln}")
-                lines_out.append("")  # blank line
-            current_assistant_buffer.clear()
 
     for raw_line in stdout.splitlines():
         raw_line = raw_line.strip()
@@ -104,53 +97,64 @@ def format_exec_log_from_result(result_path: str, max_lines: int = 200) -> str:
         try:
             event = json.loads(raw_line)
         except json.JSONDecodeError:
-            # Fallback: raw text line
-            if raw_line:
-                current_assistant_buffer.append(raw_line + "\n")
+            # Plain text fallback
+            lines_out.append(raw_line)
             continue
 
         etype = event.get("type")
 
-        # Claude text deltas
-        if etype == "content_block_delta":
-            delta = event.get("delta", {})
-            if delta.get("type") == "text_delta":
-                current_assistant_buffer.append(delta.get("text", ""))
+        # Assistant message with content blocks
+        if etype == "assistant" and "message" in event:
+            msg = event["message"]
+            content_blocks = msg.get("content") or []
+            for block in content_blocks:
+                btype = block.get("type")
+                if btype == "text":
+                    text = block.get("text") or ""
+                    if text:
+                        lines_out.append("Claude:")
+                        for ln in text.splitlines():
+                            lines_out.append(f"  {ln}")
+                        lines_out.append("")  # blank line
+                elif btype == "tool_use":
+                    name = block.get("name") or "<tool>"
+                    lines_out.append(f"🔧 Tool call: {name}")
+                    lines_out.append("")
             continue
 
-        # Tool use start (content_block_start with tool_use)
-        if etype == "content_block_start":
-            content = event.get("content_block", {})
-            if content.get("type") == "tool_use":
-                flush_assistant()
-                name = content.get("name") or "<unknown tool>"
-                tool_id = content.get("id")
-                lines_out.append(f"🔧 Tool call: {name}")
-                if tool_id:
-                    lines_out.append(f"  id: {tool_id}")
-                # Args might come in input_json_delta events, skip for now
-                lines_out.append("")
+        # Direct text events
+        if etype == "text":
+            text = event.get("text", "")
+            if text:
+                for ln in text.splitlines():
+                    lines_out.append(ln)
             continue
 
-        # Standalone tool_use event (alternative format)
+        # Tool use events
         if etype == "tool_use":
-            flush_assistant()
-            name = event.get("name") or "<unknown tool>"
-            tool_id = event.get("id") or event.get("tool_use_id")
-            args = event.get("input") or {}
-            args_preview = repr(args)
-            if len(args_preview) > 200:
-                args_preview = args_preview[:197] + "..."
+            name = event.get("name") or "<tool>"
             lines_out.append(f"🔧 Tool call: {name}")
-            if args:
-                lines_out.append(f"  args: {args_preview}")
+            tool_id = event.get("id") or event.get("tool_use_id")
             if tool_id:
                 lines_out.append(f"  id: {tool_id}")
+            args = event.get("input") or {}
+            if args:
+                args_preview = repr(args)
+                if len(args_preview) > 200:
+                    args_preview = args_preview[:197] + "..."
+                lines_out.append(f"  args: {args_preview}")
             lines_out.append("")
             continue
 
-    # Flush any remaining assistant text
-    flush_assistant()
+        # Final result event
+        if etype == "result":
+            subtype = event.get("subtype")
+            if subtype == "success":
+                lines_out.append("✅ Execution completed successfully.")
+            elif subtype:
+                lines_out.append(f"Result: {subtype}")
+            lines_out.append("")
+            continue
 
     if not lines_out:
         return ""
@@ -236,10 +240,36 @@ class TUIController:
 
     def _load_exec_snippet(self, task) -> str:
         """Load formatted execution log snippet for the task."""
+        if not getattr(task, "result_path", None):
+            return ""
+
+        path = Path(task.result_path)
+        if not path.exists():
+            return ""
+
         try:
-            return format_exec_log_from_result(task.result_path, max_lines=200)
+            with path.open("r") as f:
+                data = json.load(f)
         except Exception:
             return ""
+
+        stdout = data.get("stdout", "")
+        if not stdout:
+            return ""
+
+        # First try formatted view
+        try:
+            formatted = format_exec_log_from_result(task.result_path, max_lines=200)
+        except Exception:
+            formatted = ""
+
+        if formatted:
+            return formatted
+
+        # Fallback: raw tail (old behavior)
+        lines = stdout.strip().splitlines()
+        tail = lines[-40:]
+        return "\n".join(tail)
 
     def _load_files_info(self, task) -> dict:
         """Load file changes info"""
