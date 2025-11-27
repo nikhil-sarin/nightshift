@@ -111,17 +111,17 @@ def create_keybindings(state: UIState, controller, cmd_widget) -> KeyBindings:
         controller.approve_selected_task()
         get_app().invalidate()
 
-    # Review/edit selected STAGED task
-    @kb.add('e', filter=is_normal_mode)
+    # Review/revise selected STAGED task
+    @kb.add('r', filter=is_normal_mode)
     def _(event):
-        """Review/edit selected task"""
+        """Review/revise selected task"""
         controller.review_selected_task()
         get_app().invalidate()
 
-    # Reject/cancel selected task
-    @kb.add('r', filter=is_normal_mode)
+    # Cancel selected task
+    @kb.add('c', filter=is_normal_mode)
     def _(event):
-        """Reject/cancel selected task"""
+        """Cancel selected task"""
         controller.reject_selected_task()
         get_app().invalidate()
 

@@ -577,7 +577,7 @@ class TUIController:
         task = self.queue.get_task(row.task_id)
 
         if task.status != TaskStatus.STAGED.value:
-            self.state.message = "Approve: task is not STAGED"
+            self.state.message = "Approve: only STAGED tasks can be approved"
             return
 
         def work():
@@ -589,7 +589,7 @@ class TUIController:
         self._run_in_thread(f"Executing {task.task_id}...", work)
 
     def reject_selected_task(self):
-        """Reject/cancel the selected task (STAGED or COMMITTED)."""
+        """Cancel the selected task (STAGED or COMMITTED)."""
         if not self.state.tasks:
             return
 
@@ -597,7 +597,7 @@ class TUIController:
         task = self.queue.get_task(row.task_id)
 
         if task.status not in (TaskStatus.STAGED.value, TaskStatus.COMMITTED.value):
-            self.state.message = "Reject: only STAGED/COMMITTED can be cancelled"
+            self.state.message = "Cancel: only STAGED/COMMITTED tasks can be cancelled"
             return
 
         self.queue.update_status(task.task_id, TaskStatus.CANCELLED)
@@ -684,7 +684,7 @@ class TUIController:
         task = self.queue.get_task(row.task_id)
 
         if task.status != TaskStatus.STAGED.value:
-            self.state.message = "Review: only STAGED tasks can be edited"
+            self.state.message = "Review: only STAGED tasks can be reviewed"
             return
 
         def open_editor_and_refine():
