@@ -68,6 +68,13 @@ class DummyQueue:
         self._tasks[task_id] = task
         return task
 
+    def delete_task(self, task_id):
+        """Delete a task"""
+        if task_id in self._tasks:
+            del self._tasks[task_id]
+            return True
+        return False
+
 
 class DummyConfig:
     """Mock Config for testing"""

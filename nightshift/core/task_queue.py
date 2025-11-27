@@ -242,6 +242,14 @@ class TaskQueue:
 
             return tasks
 
+    def delete_task(self, task_id: str) -> bool:
+        """Delete a task and its logs"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM task_logs WHERE task_id = ?", (task_id,))
+            cursor = conn.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
     def update_status(
         self,
         task_id: str,

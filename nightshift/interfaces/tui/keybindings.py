@@ -139,6 +139,13 @@ def create_keybindings(state: UIState, controller, cmd_widget) -> KeyBindings:
         controller.kill_selected_task()
         get_app().invalidate()
 
+    # Delete task
+    @kb.add('d', filter=is_normal_mode)
+    def _(event):
+        """Delete selected task"""
+        controller.delete_selected_task()
+        get_app().invalidate()
+
     # Submit new task (vim editor)
     @kb.add('s', filter=is_normal_mode)
     def _(event):

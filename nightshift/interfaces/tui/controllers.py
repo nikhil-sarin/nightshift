@@ -655,3 +655,22 @@ class TUIController:
         self.logger.info(f"TUI: killed {task.task_id}")
         self.state.message = f"Killed {task.task_id}"
         self.refresh_tasks()
+
+    def delete_selected_task(self):
+        """Delete the currently selected task."""
+        if not self.state.tasks:
+            return
+
+        row = self.state.tasks[self.state.selected_index]
+        self._run_in_thread(
+            f"Deleting {row.task_id}",
+            self._delete_task,
+            row.task_id
+        )
+
+    def _delete_task(self, task_id: str):
+        """Delete task from database (internal)"""
+        self.queue.delete_task(task_id)
+        self.logger.info(f"TUI: deleted {task_id}")
+        self.state.message = f"Deleted {task_id}"
+        self.refresh_tasks()
