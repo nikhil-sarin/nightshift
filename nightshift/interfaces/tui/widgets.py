@@ -39,21 +39,28 @@ class TaskListControl(FormattedTextControl):
 
 
 class DetailControl(FormattedTextControl):
-    """Control for displaying task details - returns full content, Window handles scrolling"""
+    """Control for displaying task details with manual scroll slicing"""
 
     def __init__(self, state: UIState):
         self.state = state
         super().__init__(self.get_text)
 
+    def _get_visible_height(self) -> int:
+        """Get visible window height from render_info, or default"""
+        if self.state.detail_window and self.state.detail_window.render_info:
+            # Subtract 2 for tab bar
+            return max(10, self.state.detail_window.render_info.window_height - 2)
+        return 40  # Sensible default before first render
+
     def get_text(self):
-        """Generate formatted text for detail panel - full content, no slicing"""
+        """Generate formatted text for detail panel with scroll slicing"""
         st = self.state.selected_task
         tab = self.state.detail_tab
 
         if not st.details:
             return [("class:dim", "No task selected\n")]
 
-        # Build tab bar
+        # Build tab bar (always visible, not scrolled)
         tab_bar = []
         tab_names = [
             ("1", "Overview"),
@@ -74,8 +81,25 @@ class DetailControl(FormattedTextControl):
         # Build full content lines
         content_lines = self._build_content_lines(st, tab)
 
-        # Return tab bar + full content (Window handles scrolling)
-        return tab_bar + content_lines
+        # Convert to line-based list for slicing (each element ends with \n)
+        # content_lines is [(style, "text\n"), ...] - one tuple per line
+        total_lines = len(content_lines)
+        visible_height = self._get_visible_height()
+        offset = self.state.detail_scroll_offset
+
+        # Clamp offset to valid range
+        max_offset = max(0, total_lines - visible_height)
+        offset = max(0, min(offset, max_offset))
+        self.state.detail_scroll_offset = offset  # Update state with clamped value
+
+        # Slice visible portion
+        visible_lines = content_lines[offset:offset + visible_height]
+
+        # Store total for scroll indicators
+        self.state._content_line_count = total_lines
+
+        # Return tab bar + visible slice
+        return tab_bar + visible_lines
 
     def _build_content_lines(self, st, tab):
         """Build all content lines for the current tab"""
@@ -330,19 +354,23 @@ class StatusBarControl(FormattedTextControl):
         msg = self.state.busy_label or self.state.message or ""
         hints = "j/k:nav h/l:tabs a:approve r:review c:cancel d:delete s:submit ^d/^u:scroll o:pager q:quit"
 
-        # Get scroll info from detail_window if available
+        # Get scroll info from state (set by DetailControl during render)
         scroll_info = ""
+        total = getattr(self.state, '_content_line_count', 0)
+        offset = self.state.detail_scroll_offset
+        visible = 40  # Default
         if self.state.detail_window and self.state.detail_window.render_info:
-            info = self.state.detail_window.render_info
-            above = info.vertical_scroll
-            below = max(0, info.content_height - (info.vertical_scroll + info.window_height))
-            if above > 0 or below > 0:
-                parts = []
-                if above > 0:
-                    parts.append(f"↑{above}")
-                if below > 0:
-                    parts.append(f"↓{below}")
-                scroll_info = f" [{'/'.join(parts)}]"
+            visible = max(10, self.state.detail_window.render_info.window_height - 2)
+
+        above = offset
+        below = max(0, total - offset - visible)
+        if above > 0 or below > 0:
+            parts = []
+            if above > 0:
+                parts.append(f"↑{above}")
+            if below > 0:
+                parts.append(f"↓{below}")
+            scroll_info = f" [{'/'.join(parts)}]"
 
         if msg and ("failed" in msg.lower() or "error" in msg.lower()):
             text = f" {mode}{scroll_info} | {msg[:120]}"
@@ -366,17 +394,11 @@ def create_task_list_window(state: UIState) -> Window:
 
 
 def create_detail_window(state: UIState) -> Window:
-    """Create the detail panel window with scroll support"""
-    from prompt_toolkit.layout.margins import ScrollbarMargin
-
+    """Create the detail panel window (scrolling handled by DetailControl)"""
     return Window(
         DetailControl(state),
-        wrap_lines=True,
+        wrap_lines=False,  # We handle line breaks in content
         always_hide_cursor=True,
-        # Drive vertical scroll from state
-        get_vertical_scroll=lambda window: state.detail_scroll_offset,
-        # Visual scrollbar on right side
-        right_margins=[ScrollbarMargin(display_arrows=True)],
     )
 
 

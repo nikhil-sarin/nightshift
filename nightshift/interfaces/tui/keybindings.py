@@ -29,22 +29,11 @@ def create_keybindings(state: UIState, controller, cmd_widget, detail_window=Non
     is_command_mode = Condition(lambda: state.command_active)
     is_normal_mode = ~is_command_mode
 
-    def get_scroll_info():
-        """Get scroll info from detail window render_info"""
+    def get_page_size():
+        """Get page size from render_info, or default"""
         if detail_window and detail_window.render_info:
-            info = detail_window.render_info
-            return {
-                'window_height': info.window_height,
-                'content_height': info.content_height,
-                'vertical_scroll': info.vertical_scroll,
-            }
-        return {'window_height': 20, 'content_height': 0, 'vertical_scroll': 0}
-
-    def clamp_scroll():
-        """Clamp scroll offset to valid range"""
-        info = get_scroll_info()
-        max_scroll = max(0, info['content_height'] - info['window_height'])
-        state.detail_scroll_offset = max(0, min(state.detail_scroll_offset, max_scroll))
+            return max(10, detail_window.render_info.window_height - 2)
+        return 40
 
     # Movement: j/k and arrow keys for up/down navigation
     @kb.add('j', filter=is_normal_mode)
@@ -118,43 +107,39 @@ def create_keybindings(state: UIState, controller, cmd_widget, detail_window=Non
         state.detail_tab = tabs[(current_idx + 1) % len(tabs)]
         state.detail_scroll_offset = 0
 
-    # Detail panel scrolling (uses dynamic page size from render_info)
+    # Detail panel scrolling (clamping handled by DetailControl on next render)
     @kb.add('c-d', filter=is_normal_mode)
     def _(event):
         """Scroll detail panel down (half page)"""
-        info = get_scroll_info()
-        half_page = max(1, info['window_height'] // 2)
+        half_page = max(1, get_page_size() // 2)
         state.detail_scroll_offset += half_page
-        clamp_scroll()
         get_app().invalidate()
 
     @kb.add('c-u', filter=is_normal_mode)
     def _(event):
         """Scroll detail panel up (half page)"""
-        info = get_scroll_info()
-        half_page = max(1, info['window_height'] // 2)
+        half_page = max(1, get_page_size() // 2)
         state.detail_scroll_offset -= half_page
-        clamp_scroll()
+        if state.detail_scroll_offset < 0:
+            state.detail_scroll_offset = 0
         get_app().invalidate()
 
     @kb.add('c-f', filter=is_normal_mode)
     @kb.add('pagedown', filter=is_normal_mode)
     def _(event):
         """Scroll detail panel down (full page)"""
-        info = get_scroll_info()
-        page = max(1, info['window_height'] - 2)  # leave 2 lines overlap
+        page = max(1, get_page_size() - 2)  # leave 2 lines overlap
         state.detail_scroll_offset += page
-        clamp_scroll()
         get_app().invalidate()
 
     @kb.add('c-b', filter=is_normal_mode)
     @kb.add('pageup', filter=is_normal_mode)
     def _(event):
         """Scroll detail panel up (full page)"""
-        info = get_scroll_info()
-        page = max(1, info['window_height'] - 2)
+        page = max(1, get_page_size() - 2)
         state.detail_scroll_offset -= page
-        clamp_scroll()
+        if state.detail_scroll_offset < 0:
+            state.detail_scroll_offset = 0
         get_app().invalidate()
 
     @kb.add('c-g', filter=is_normal_mode)
@@ -166,8 +151,8 @@ def create_keybindings(state: UIState, controller, cmd_widget, detail_window=Non
     @kb.add('c-e', filter=is_normal_mode)
     def _(event):
         """Scroll to bottom of detail panel"""
-        info = get_scroll_info()
-        state.detail_scroll_offset = max(0, info['content_height'] - info['window_height'])
+        # Set to large value; DetailControl will clamp on render
+        state.detail_scroll_offset = 999999
         get_app().invalidate()
 
     # Open current content in pager
