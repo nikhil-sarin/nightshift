@@ -57,21 +57,25 @@ def create_keybindings(state: UIState, controller, cmd_widget) -> KeyBindings:
     def _(event):
         """Switch to overview tab"""
         state.detail_tab = "overview"
+        state.detail_scroll_offset = 0
 
     @kb.add('2', filter=is_normal_mode)
     def _(event):
         """Switch to exec tab"""
         state.detail_tab = "exec"
+        state.detail_scroll_offset = 0
 
     @kb.add('3', filter=is_normal_mode)
     def _(event):
         """Switch to files tab"""
         state.detail_tab = "files"
+        state.detail_scroll_offset = 0
 
     @kb.add('4', filter=is_normal_mode)
     def _(event):
         """Switch to summary tab"""
         state.detail_tab = "summary"
+        state.detail_scroll_offset = 0
 
     # h/l for prev/next tab
     @kb.add('h', filter=is_normal_mode)
@@ -80,6 +84,7 @@ def create_keybindings(state: UIState, controller, cmd_widget) -> KeyBindings:
         tabs = ["overview", "exec", "files", "summary"]
         current_idx = tabs.index(state.detail_tab)
         state.detail_tab = tabs[(current_idx - 1) % len(tabs)]
+        state.detail_scroll_offset = 0
 
     @kb.add('l', filter=is_normal_mode)
     def _(event):
@@ -87,6 +92,54 @@ def create_keybindings(state: UIState, controller, cmd_widget) -> KeyBindings:
         tabs = ["overview", "exec", "files", "summary"]
         current_idx = tabs.index(state.detail_tab)
         state.detail_tab = tabs[(current_idx + 1) % len(tabs)]
+        state.detail_scroll_offset = 0
+
+    # Detail panel scrolling
+    SCROLL_STEP = 10  # lines per Ctrl+D/U
+
+    @kb.add('c-d', filter=is_normal_mode)
+    @kb.add('pagedown', filter=is_normal_mode)
+    def _(event):
+        """Scroll detail panel down"""
+        state.detail_scroll_offset += SCROLL_STEP
+        get_app().invalidate()
+
+    @kb.add('c-u', filter=is_normal_mode)
+    @kb.add('pageup', filter=is_normal_mode)
+    def _(event):
+        """Scroll detail panel up"""
+        state.detail_scroll_offset = max(0, state.detail_scroll_offset - SCROLL_STEP)
+        get_app().invalidate()
+
+    @kb.add('c-f', filter=is_normal_mode)
+    def _(event):
+        """Scroll detail panel down (full page)"""
+        state.detail_scroll_offset += SCROLL_STEP * 3
+        get_app().invalidate()
+
+    @kb.add('c-b', filter=is_normal_mode)
+    def _(event):
+        """Scroll detail panel up (full page)"""
+        state.detail_scroll_offset = max(0, state.detail_scroll_offset - SCROLL_STEP * 3)
+        get_app().invalidate()
+
+    @kb.add('c-g', filter=is_normal_mode)
+    def _(event):
+        """Scroll to top of detail panel"""
+        state.detail_scroll_offset = 0
+        get_app().invalidate()
+
+    @kb.add('c-e', filter=is_normal_mode)
+    def _(event):
+        """Scroll to bottom of detail panel"""
+        state.detail_scroll_offset = 99999  # will be clamped by DetailControl
+        get_app().invalidate()
+
+    # Open current content in pager
+    @kb.add('o', filter=is_normal_mode)
+    def _(event):
+        """Open current tab content in $PAGER"""
+        controller.open_in_pager()
 
     # Quit
     @kb.add('q', filter=is_normal_mode)

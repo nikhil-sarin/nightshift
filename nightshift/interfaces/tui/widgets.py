@@ -39,23 +39,33 @@ class TaskListControl(FormattedTextControl):
 
 
 class DetailControl(FormattedTextControl):
-    """Control for displaying task details"""
+    """Control for displaying task details with scrolling support"""
+
+    # Visible lines in detail panel (approximate, will be clipped by window)
+    VISIBLE_LINES = 40
+    SCROLL_STEP = 10  # lines to scroll with Ctrl+D/U
 
     def __init__(self, state: UIState):
         self.state = state
+        self._total_lines = 0  # track total content lines for scroll bounds
         super().__init__(self.get_text)
 
+    @property
+    def total_lines(self) -> int:
+        """Return total number of content lines (for scroll bounds)"""
+        return self._total_lines
+
     def get_text(self):
-        """Generate formatted text for detail panel"""
+        """Generate formatted text for detail panel with scroll support"""
         st = self.state.selected_task
         tab = self.state.detail_tab
 
         if not st.details:
+            self._total_lines = 0
             return [("class:dim", "No task selected\n")]
 
-        lines = []
-
-        # Tab bar
+        # Build tab bar (always visible, not scrolled)
+        tab_bar = []
         tab_names = [
             ("1", "Overview"),
             ("2", "Exec"),
@@ -67,10 +77,45 @@ class DetailControl(FormattedTextControl):
         for i, (key, name) in enumerate(tab_names):
             is_active = tab_values[i] == tab
             if is_active:
-                lines.append(("class:tab-active", f" {key}:{name} "))
+                tab_bar.append(("class:tab-active", f" {key}:{name} "))
             else:
-                lines.append(("class:dim", f" {key}:{name} "))
-        lines.append(("", "\n\n"))
+                tab_bar.append(("class:dim", f" {key}:{name} "))
+        tab_bar.append(("", "\n\n"))
+
+        # Build content lines (scrollable)
+        lines = self._build_content_lines(st, tab)
+
+        # Track total lines for scroll bounds
+        self._total_lines = len(lines)
+
+        # Apply scroll offset
+        offset = self.state.detail_scroll_offset
+        max_offset = max(0, self._total_lines - self.VISIBLE_LINES)
+        offset = min(offset, max_offset)  # clamp to valid range
+        self.state.detail_scroll_offset = offset  # update if clamped
+
+        # Slice visible portion
+        visible_lines = lines[offset:offset + self.VISIBLE_LINES]
+
+        # Build final output with scroll indicators
+        result = list(tab_bar)
+
+        # Show "more above" indicator
+        if offset > 0:
+            result.append(("class:dim", f"  ↑ {offset} more lines above (Ctrl+U to scroll up)\n"))
+
+        result.extend(visible_lines)
+
+        # Show "more below" indicator
+        remaining = self._total_lines - offset - len(visible_lines)
+        if remaining > 0:
+            result.append(("class:dim", f"  ↓ {remaining} more lines below (Ctrl+D to scroll down)\n"))
+
+        return result
+
+    def _build_content_lines(self, st, tab):
+        """Build all content lines for the current tab (without truncation)"""
+        lines = []
 
         if tab == "overview":
             lines.append(("bold", f"Task: {st.task_id}\n\n"))
@@ -179,39 +224,23 @@ class DetailControl(FormattedTextControl):
                 modified = fi.get('modified', [])
                 deleted = fi.get('deleted', [])
 
-                max_per_section = 20  # show more here than summary tab
-
-                # Created
+                # Show all files - scrolling handles long lists
                 if created:
-                    total = len(created)
-                    lines.append(("class:file-created-title", f"✨ Created ({total})\n"))
-                    for path in created[:max_per_section]:
+                    lines.append(("class:file-created-title", f"✨ Created ({len(created)})\n"))
+                    for path in created:
                         lines.append(("class:file-created", f"  • {path}\n"))
-                    if total > max_per_section:
-                        remaining = total - max_per_section
-                        lines.append(("class:dim", f"  ... {remaining} more created files not shown\n"))
                     lines.append(("", "\n"))
 
-                # Modified
                 if modified:
-                    total = len(modified)
-                    lines.append(("class:file-modified-title", f"✏️ Modified ({total})\n"))
-                    for path in modified[:max_per_section]:
+                    lines.append(("class:file-modified-title", f"✏️ Modified ({len(modified)})\n"))
+                    for path in modified:
                         lines.append(("class:file-modified", f"  • {path}\n"))
-                    if total > max_per_section:
-                        remaining = total - max_per_section
-                        lines.append(("class:dim", f"  ... {remaining} more modified files not shown\n"))
                     lines.append(("", "\n"))
 
-                # Deleted
                 if deleted:
-                    total = len(deleted)
-                    lines.append(("class:file-deleted-title", f"🗑️ Deleted ({total})\n"))
-                    for path in deleted[:max_per_section]:
+                    lines.append(("class:file-deleted-title", f"🗑️ Deleted ({len(deleted)})\n"))
+                    for path in deleted:
                         lines.append(("class:file-deleted", f"  • {path}\n"))
-                    if total > max_per_section:
-                        remaining = total - max_per_section
-                        lines.append(("class:dim", f"  ... {remaining} more deleted files not shown\n"))
                     lines.append(("", "\n"))
 
         elif tab == "summary":
@@ -248,7 +277,10 @@ class DetailControl(FormattedTextControl):
                 if info.get("claude_summary"):
                     lines.append(("class:section-title", "🤖 What NightShift found/created\n"))
                     lines.append(("", "-" * 40 + "\n"))
-                    lines.append(("", _truncate(info["claude_summary"], 1200) + "\n\n"))
+                    # No truncation - scrolling handles long content
+                    for line in info["claude_summary"].splitlines():
+                        lines.append(("", line + "\n"))
+                    lines.append(("", "\n"))
 
                 # --- Execution metrics ---
                 lines.append(("class:section-title", "📈 Execution metrics\n"))
@@ -332,7 +364,7 @@ class StatusBarControl(FormattedTextControl):
         """Generate formatted text for status bar"""
         mode = "COMMAND" if self.state.command_active else "NORMAL"
         msg = self.state.busy_label or self.state.message or ""
-        hints = "j/k:nav h/l:tabs 1-4:tab a:approve r:review c:cancel p:pause P:resume X:kill d:delete s:submit q:quit R:refresh :help"
+        hints = "j/k:nav h/l:tabs a:approve r:review c:cancel d:delete s:submit ^d/^u:scroll o:pager q:quit"
 
         if msg and ("failed" in msg.lower() or "error" in msg.lower()):
             text = f" {mode} | {msg[:120]}"

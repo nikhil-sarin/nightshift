@@ -41,6 +41,7 @@ class UIState:
     tasks: List[TaskRow] = field(default_factory=list)
     selected_index: int = 0
     scroll_offset: int = 0
+    detail_scroll_offset: int = 0         # scroll position within detail panel
     status_filter: Optional[str] = None   # 'staged', 'running', etc.
     focus_panel: str = "list"             # 'list'|'detail'
     detail_tab: str = "overview"          # 'overview'|'exec'|'files'|'summary'
