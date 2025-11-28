@@ -49,7 +49,7 @@ class DetailControl(FormattedTextControl):
         """Get visible window height from render_info, or default"""
         if self.state.detail_window and self.state.detail_window.render_info:
             # Subtract 2 for tab bar
-            return max(10, self.state.detail_window.render_info.window_height - 2)
+            return max(1, self.state.detail_window.render_info.window_height - 2)
         return 40  # Sensible default before first render
 
     def get_text(self):
@@ -360,7 +360,7 @@ class StatusBarControl(FormattedTextControl):
         offset = self.state.detail_scroll_offset
         visible = 40  # Default
         if self.state.detail_window and self.state.detail_window.render_info:
-            visible = max(10, self.state.detail_window.render_info.window_height - 2)
+            visible = max(1, self.state.detail_window.render_info.window_height - 2)
 
         above = offset
         below = max(0, total - offset - visible)
