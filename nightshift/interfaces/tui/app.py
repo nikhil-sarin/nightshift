@@ -54,9 +54,9 @@ def create_app() -> Application:
 
     # Define style - use terminal color palette
     style = Style.from_dict({
-        "statusbar": "dim",
-        "separator": "dim",
-        "dim": "dim",
+        "statusbar": "fg:ansibrightblack",
+        "separator": "fg:ansibrightblack",
+        "dim": "fg:ansibrightblack",
         "yellow": "fg:ansiyellow",
         "orange": "fg:ansibrightred",
         "blue": "fg:ansiblue",
@@ -157,9 +157,9 @@ def create_app_for_test(tasks=None, tmp_path=None, disable_auto_refresh: bool = 
 
     # Minimal style for tests
     style = Style.from_dict({
-        "statusbar": "dim",
-        "separator": "dim",
-        "dim": "dim",
+        "statusbar": "fg:ansibrightblack",
+        "separator": "fg:ansibrightblack",
+        "dim": "fg:ansibrightblack",
         "yellow": "fg:ansiyellow",
         "orange": "fg:ansibrightred",
         "blue": "fg:ansiblue",

@@ -551,9 +551,7 @@ class TUIController:
                 allowed_tools=plan.get("allowed_tools", []),
                 allowed_directories=plan.get("allowed_directories", []),
                 needs_git=plan.get("needs_git", False),
-                system_prompt=plan.get("system_prompt", ""),
-                estimated_tokens=plan.get("estimated_tokens"),
-                estimated_time=plan.get("estimated_time"),
+                system_prompt=plan.get("system_prompt", "")
             )
 
             self.logger.info(f"TUI: created task {task_id}")
@@ -715,8 +713,6 @@ class TUIController:
                     f.write(f"# Allowed Directories: {', '.join(task.allowed_directories)}\n")
                 if task.system_prompt:
                     f.write(f"# System Prompt: {task.system_prompt[:200]}...\n")
-                f.write(f"# Estimated Tokens: {task.estimated_tokens}\n")
-                f.write(f"# Estimated Time: {task.estimated_time}s\n")
                 f.write("#\n")
                 f.write("# Save and quit to submit changes, or quit without saving to cancel\n")
                 temp_path = f.name
@@ -751,8 +747,6 @@ class TUIController:
                 "allowed_directories": task.allowed_directories or [],
                 "needs_git": task.needs_git or False,
                 "system_prompt": task.system_prompt or "",
-                "estimated_tokens": task.estimated_tokens or 0,
-                "estimated_time": task.estimated_time or 0,
             }
 
             # Run planner in background thread to avoid blocking TUI
@@ -768,9 +762,7 @@ class TUIController:
                         allowed_tools=refined_plan.get("allowed_tools", []),
                         allowed_directories=refined_plan.get("allowed_directories", []),
                         needs_git=refined_plan.get("needs_git", False),
-                        system_prompt=refined_plan.get("system_prompt", ""),
-                        estimated_tokens=refined_plan.get("estimated_tokens"),
-                        estimated_time=refined_plan.get("estimated_time"),
+                        system_prompt=refined_plan.get("system_prompt", "")
                     )
 
                     if success:
