@@ -25,7 +25,11 @@ def create_app() -> Application:
     cfg = Config()
     logger = NightShiftLogger(log_dir=str(cfg.get_log_dir()), console_output=False)
     queue = TaskQueue(db_path=str(cfg.get_database_path()))
-    planner = TaskPlanner(logger, tools_reference_path=str(cfg.get_tools_reference_path()))
+    planner = TaskPlanner(
+        logger,
+        tools_reference_path=str(cfg.get_tools_reference_path()),
+        directory_map_path=str(cfg.get_directory_map_path())
+    )
     agent = AgentManager(
         queue,
         logger,
