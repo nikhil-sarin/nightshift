@@ -45,6 +45,16 @@ class TestTaskPlannerInit:
 
         assert planner.tools_reference == ""
 
+    def test_init_default_tools_reference_path(self, mock_logger):
+        """TaskPlanner uses default package tools reference when path not specified"""
+        planner = TaskPlanner(logger=mock_logger)
+
+        # Should resolve to package's config directory
+        expected_path = Path(__file__).parent.parent.parent / "nightshift" / "config" / "claude-code-tools-reference.md"
+        # The path should be set even if file doesn't exist in test environment
+        assert "config" in str(planner.tools_reference_path)
+        assert "claude-code-tools-reference.md" in str(planner.tools_reference_path)
+
     def test_init_default_claude_bin(self, mock_logger, tools_reference):
         """TaskPlanner defaults to 'claude' binary"""
         planner = TaskPlanner(logger=mock_logger, tools_reference_path=tools_reference)
@@ -221,6 +231,60 @@ class TestPlanTask:
             call_kwargs = mock_run.call_args[1]
             assert call_kwargs["timeout"] == 60
 
+    def test_plan_task_parses_plain_fenced_json(self, mock_logger, tools_reference):
+        """plan_task handles plain ``` fences without json suffix"""
+        planner = TaskPlanner(logger=mock_logger, tools_reference_path=tools_reference)
+
+        # Format with plain ``` fence (not ```json)
+        mock_response = {
+            "result": """```
+{
+    "enhanced_prompt": "Plain fenced prompt",
+    "allowed_tools": ["Read"],
+    "allowed_directories": ["/tmp"],
+    "needs_git": false,
+    "system_prompt": "System prompt"
+}
+```"""
+        }
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = Mock(
+                returncode=0,
+                stdout=json.dumps(mock_response),
+                stderr=""
+            )
+
+            plan = planner.plan_task("Test task")
+
+            assert plan["enhanced_prompt"] == "Plain fenced prompt"
+            assert plan["allowed_tools"] == ["Read"]
+
+    def test_plan_task_parses_direct_json(self, mock_logger, tools_reference):
+        """plan_task handles direct JSON without wrapper"""
+        planner = TaskPlanner(logger=mock_logger, tools_reference_path=tools_reference)
+
+        # Direct JSON without structured_output or result wrapper
+        mock_response = {
+            "enhanced_prompt": "Direct prompt",
+            "allowed_tools": ["Write"],
+            "allowed_directories": ["/home"],
+            "needs_git": True,
+            "system_prompt": "Direct system prompt"
+        }
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = Mock(
+                returncode=0,
+                stdout=json.dumps(mock_response),
+                stderr=""
+            )
+
+            plan = planner.plan_task("Test task")
+
+            assert plan["enhanced_prompt"] == "Direct prompt"
+            assert plan["needs_git"] is True
+
 
 class TestRefinePlan:
     """Tests for refine_plan method"""
@@ -274,6 +338,151 @@ class TestRefinePlan:
                 planner.refine_plan({}, "feedback")
 
             assert "took too long" in str(exc_info.value)
+
+    def test_refine_plan_command_failure(self, mock_logger, tools_reference):
+        """refine_plan raises exception on command failure"""
+        planner = TaskPlanner(logger=mock_logger, tools_reference_path=tools_reference)
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = Mock(
+                returncode=1,
+                stdout="",
+                stderr="Refinement command failed"
+            )
+
+            with pytest.raises(Exception) as exc_info:
+                planner.refine_plan({}, "Add more tools")
+
+            assert "refinement failed" in str(exc_info.value).lower()
+
+    def test_refine_plan_invalid_json(self, mock_logger, tools_reference):
+        """refine_plan raises exception on invalid JSON response"""
+        planner = TaskPlanner(logger=mock_logger, tools_reference_path=tools_reference)
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = Mock(
+                returncode=0,
+                stdout="not valid json at all",
+                stderr=""
+            )
+
+            with pytest.raises(Exception) as exc_info:
+                planner.refine_plan({}, "feedback")
+
+            assert "not valid JSON" in str(exc_info.value)
+
+    def test_refine_plan_parses_result_wrapper(self, mock_logger, tools_reference):
+        """refine_plan handles result wrapper with code fences"""
+        planner = TaskPlanner(logger=mock_logger, tools_reference_path=tools_reference)
+
+        mock_response = {
+            "result": """```json
+{
+    "enhanced_prompt": "Refined via wrapper",
+    "allowed_tools": ["Read", "Write"],
+    "allowed_directories": ["/tmp"],
+    "needs_git": false,
+    "system_prompt": "Refined system",
+    "estimated_tokens": 1200
+}
+```"""
+        }
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = Mock(
+                returncode=0,
+                stdout=json.dumps(mock_response),
+                stderr=""
+            )
+
+            refined = planner.refine_plan({}, "Add Write tool")
+
+            assert refined["enhanced_prompt"] == "Refined via wrapper"
+            assert "Write" in refined["allowed_tools"]
+            assert refined["estimated_tokens"] == 1200
+
+    def test_refine_plan_parses_plain_fenced_json(self, mock_logger, tools_reference):
+        """refine_plan handles plain ``` fences without json suffix"""
+        planner = TaskPlanner(logger=mock_logger, tools_reference_path=tools_reference)
+
+        mock_response = {
+            "result": """```
+{
+    "enhanced_prompt": "Plain fence refined",
+    "allowed_tools": ["Bash"],
+    "allowed_directories": ["/home"],
+    "needs_git": true,
+    "system_prompt": "Use bash",
+    "estimated_tokens": 800
+}
+```"""
+        }
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = Mock(
+                returncode=0,
+                stdout=json.dumps(mock_response),
+                stderr=""
+            )
+
+            refined = planner.refine_plan({}, "Add Bash tool")
+
+            assert refined["enhanced_prompt"] == "Plain fence refined"
+            assert refined["needs_git"] is True
+
+    def test_refine_plan_parses_direct_json(self, mock_logger, tools_reference):
+        """refine_plan handles direct JSON without wrapper"""
+        planner = TaskPlanner(logger=mock_logger, tools_reference_path=tools_reference)
+
+        # Direct JSON without structured_output or result wrapper
+        mock_response = {
+            "enhanced_prompt": "Direct refined",
+            "allowed_tools": ["Read"],
+            "allowed_directories": ["/data"],
+            "needs_git": False,
+            "system_prompt": "Direct system",
+            "estimated_tokens": 500
+        }
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = Mock(
+                returncode=0,
+                stdout=json.dumps(mock_response),
+                stderr=""
+            )
+
+            refined = planner.refine_plan({}, "Simplify")
+
+            assert refined["enhanced_prompt"] == "Direct refined"
+            assert refined["estimated_tokens"] == 500
+
+    def test_refine_plan_missing_required_field(self, mock_logger, tools_reference):
+        """refine_plan raises exception when required field missing"""
+        planner = TaskPlanner(logger=mock_logger, tools_reference_path=tools_reference)
+
+        # Missing 'estimated_tokens' field (required for refine_plan)
+        mock_response = {
+            "structured_output": {
+                "enhanced_prompt": "Test",
+                "allowed_tools": [],
+                "allowed_directories": [],
+                "needs_git": False,
+                "system_prompt": "Test"
+                # Missing estimated_tokens
+            }
+        }
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = Mock(
+                returncode=0,
+                stdout=json.dumps(mock_response),
+                stderr=""
+            )
+
+            with pytest.raises(Exception) as exc_info:
+                planner.refine_plan({}, "feedback")
+
+            assert "missing field" in str(exc_info.value).lower()
 
 
 class TestQuickEstimate:

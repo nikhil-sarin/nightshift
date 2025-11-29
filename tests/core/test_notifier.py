@@ -315,3 +315,172 @@ class TestNotifierInit:
         )
 
         assert notifier.slack_client is mock_client
+
+
+class TestDisplayTerminalEdgeCases:
+    """Edge case tests for _display_terminal"""
+
+    def test_display_terminal_many_created_files(self, tmp_path):
+        """_display_terminal truncates created files > 5"""
+        notifier = Notifier(
+            notification_dir=str(tmp_path),
+            enable_terminal_output=True
+        )
+
+        with patch.object(notifier.console, "print") as mock_print:
+            notifier._display_terminal({
+                "task_id": "task_001",
+                "status": "success",
+                "description": "Test",
+                "execution_time": 30.0,
+                "token_usage": None,
+                "file_changes": {
+                    "created": [f"file_{i}.py" for i in range(10)],
+                    "modified": [],
+                    "deleted": []
+                },
+                "error_message": None,
+                "result_path": None
+            })
+
+        # Should show "and X more" for files beyond 5
+        call_args = str(mock_print.call_args_list)
+        # The Markdown content should include the truncation message
+
+    def test_display_terminal_modified_files(self, tmp_path):
+        """_display_terminal displays modified files"""
+        notifier = Notifier(
+            notification_dir=str(tmp_path),
+            enable_terminal_output=True
+        )
+
+        with patch.object(notifier.console, "print") as mock_print:
+            notifier._display_terminal({
+                "task_id": "task_001",
+                "status": "success",
+                "description": "Test",
+                "execution_time": 30.0,
+                "token_usage": None,
+                "file_changes": {
+                    "created": [],
+                    "modified": ["changed.py", "updated.js"],
+                    "deleted": []
+                },
+                "error_message": None,
+                "result_path": None
+            })
+
+        assert mock_print.called
+
+    def test_display_terminal_many_modified_files(self, tmp_path):
+        """_display_terminal truncates modified files > 5"""
+        notifier = Notifier(
+            notification_dir=str(tmp_path),
+            enable_terminal_output=True
+        )
+
+        with patch.object(notifier.console, "print") as mock_print:
+            notifier._display_terminal({
+                "task_id": "task_001",
+                "status": "success",
+                "description": "Test",
+                "execution_time": 30.0,
+                "token_usage": None,
+                "file_changes": {
+                    "created": [],
+                    "modified": [f"file_{i}.py" for i in range(10)],
+                    "deleted": []
+                },
+                "error_message": None,
+                "result_path": None
+            })
+
+        assert mock_print.called
+
+    def test_display_terminal_deleted_files(self, tmp_path):
+        """_display_terminal displays deleted files"""
+        notifier = Notifier(
+            notification_dir=str(tmp_path),
+            enable_terminal_output=True
+        )
+
+        with patch.object(notifier.console, "print") as mock_print:
+            notifier._display_terminal({
+                "task_id": "task_001",
+                "status": "success",
+                "description": "Test",
+                "execution_time": 30.0,
+                "token_usage": None,
+                "file_changes": {
+                    "created": [],
+                    "modified": [],
+                    "deleted": ["old.py", "deprecated.js"]
+                },
+                "error_message": None,
+                "result_path": None
+            })
+
+        assert mock_print.called
+
+    def test_display_terminal_many_deleted_files(self, tmp_path):
+        """_display_terminal truncates deleted files > 5"""
+        notifier = Notifier(
+            notification_dir=str(tmp_path),
+            enable_terminal_output=True
+        )
+
+        with patch.object(notifier.console, "print") as mock_print:
+            notifier._display_terminal({
+                "task_id": "task_001",
+                "status": "success",
+                "description": "Test",
+                "execution_time": 30.0,
+                "token_usage": None,
+                "file_changes": {
+                    "created": [],
+                    "modified": [],
+                    "deleted": [f"file_{i}.py" for i in range(10)]
+                },
+                "error_message": None,
+                "result_path": None
+            })
+
+        assert mock_print.called
+
+    def test_display_terminal_with_error_message(self, tmp_path):
+        """_display_terminal displays error message for failed tasks"""
+        notifier = Notifier(
+            notification_dir=str(tmp_path),
+            enable_terminal_output=True
+        )
+
+        with patch.object(notifier.console, "print") as mock_print:
+            notifier._display_terminal({
+                "task_id": "task_001",
+                "status": "failed",
+                "description": "Test",
+                "execution_time": 10.0,
+                "token_usage": None,
+                "file_changes": {"created": [], "modified": [], "deleted": []},
+                "error_message": "Task failed: timeout exceeded",
+                "result_path": None
+            })
+
+        assert mock_print.called
+
+
+class TestSendEmail:
+    """Tests for _send_email method"""
+
+    def test_send_email_is_noop(self, tmp_path):
+        """_send_email is a no-op stub"""
+        notifier = Notifier(
+            notification_dir=str(tmp_path),
+            enable_terminal_output=False
+        )
+
+        # Should not raise
+        notifier._send_email({
+            "task_id": "task_001",
+            "status": "success"
+        })

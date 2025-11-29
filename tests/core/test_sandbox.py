@@ -141,6 +141,24 @@ class TestProfileCreation:
 
         sandbox.cleanup()
 
+    def test_create_profile_warns_on_nonexistent_directory(self, tmp_path, caplog):
+        """Profile creation warns when allowed directory doesn't exist"""
+        sandbox = SandboxManager()
+
+        nonexistent = tmp_path / "does_not_exist"
+
+        with caplog.at_level("WARNING"):
+            profile_path = sandbox.create_profile([str(nonexistent)])
+
+        # Warning should be logged
+        assert "does not exist" in caplog.text
+
+        # Profile should still be created (resolved path included)
+        content = Path(profile_path).read_text()
+        assert "does_not_exist" in content
+
+        sandbox.cleanup()
+
 
 class TestWrapCommand:
     """Tests for wrap_command method"""

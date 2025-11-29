@@ -427,3 +427,275 @@ class TestTaskDataclass:
         assert d["description"] == "Test task"
         assert d["status"] == "staged"
         assert d["allowed_tools"] == ["Read"]
+
+
+class TestMigrations:
+    """Tests for database schema migrations"""
+
+    def test_migration_adds_needs_git_column(self, tmp_path):
+        """TaskQueue migrates old database without needs_git column"""
+        import sqlite3
+        db_path = tmp_path / "old.db"
+
+        # Create old-style database without needs_git column
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("""
+            CREATE TABLE tasks (
+                task_id TEXT PRIMARY KEY,
+                description TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'staged',
+                skill_name TEXT,
+                allowed_tools TEXT,
+                allowed_directories TEXT,
+                system_prompt TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                result_path TEXT,
+                error_message TEXT,
+                token_usage TEXT,
+                execution_time REAL,
+                process_id INTEGER,
+                timeout_seconds INTEGER DEFAULT 900
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        # TaskQueue should add the column
+        queue = TaskQueue(db_path=str(db_path))
+
+        # Verify column was added by creating a task with needs_git
+        task = queue.create_task(
+            task_id="migration_test",
+            description="Test",
+            needs_git=True
+        )
+        assert task.needs_git is True
+
+    def test_migration_adds_process_id_column(self, tmp_path):
+        """TaskQueue migrates old database without process_id column"""
+        import sqlite3
+        db_path = tmp_path / "old.db"
+
+        # Create old-style database without process_id column
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("""
+            CREATE TABLE tasks (
+                task_id TEXT PRIMARY KEY,
+                description TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'staged',
+                skill_name TEXT,
+                allowed_tools TEXT,
+                allowed_directories TEXT,
+                needs_git INTEGER,
+                system_prompt TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                result_path TEXT,
+                error_message TEXT,
+                token_usage TEXT,
+                execution_time REAL,
+                timeout_seconds INTEGER DEFAULT 900
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        # TaskQueue should add the column
+        queue = TaskQueue(db_path=str(db_path))
+
+        # Verify column exists by checking task retrieval works
+        queue.create_task(task_id="process_test", description="Test")
+        task = queue.get_task("process_test")
+        assert task.process_id is None  # Default value
+
+    def test_migration_adds_timeout_seconds_column(self, tmp_path):
+        """TaskQueue migrates old database without timeout_seconds column"""
+        import sqlite3
+        db_path = tmp_path / "old.db"
+
+        # Create old-style database without timeout_seconds
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("""
+            CREATE TABLE tasks (
+                task_id TEXT PRIMARY KEY,
+                description TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'staged',
+                skill_name TEXT,
+                allowed_tools TEXT,
+                allowed_directories TEXT,
+                needs_git INTEGER,
+                system_prompt TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                result_path TEXT,
+                error_message TEXT,
+                token_usage TEXT,
+                execution_time REAL,
+                process_id INTEGER,
+                estimated_time INTEGER
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        # TaskQueue should add timeout_seconds column
+        queue = TaskQueue(db_path=str(db_path))
+
+        # Verify by creating task with timeout
+        task = queue.create_task(
+            task_id="timeout_test",
+            description="Test",
+            timeout_seconds=1800
+        )
+        assert task.timeout_seconds == 1800
+
+
+class TestTimeoutFallback:
+    """Tests for timeout_seconds backwards compatibility"""
+
+    def test_get_task_fallback_to_estimated_time(self, tmp_path):
+        """get_task uses estimated_time when timeout_seconds is NULL"""
+        import sqlite3
+        db_path = tmp_path / "test.db"
+
+        # Create database and insert task with estimated_time but NULL timeout_seconds
+        queue = TaskQueue(db_path=str(db_path))
+
+        # Manually insert with estimated_time and NULL timeout_seconds
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("""
+            INSERT INTO tasks (task_id, description, status, created_at, updated_at, timeout_seconds)
+            VALUES ('fallback_test', 'Test', 'staged', '2024-01-01', '2024-01-01', NULL)
+        """)
+        # Add estimated_time column if it doesn't exist and set value
+        try:
+            conn.execute("ALTER TABLE tasks ADD COLUMN estimated_time INTEGER")
+        except sqlite3.OperationalError:
+            pass  # Column may already exist
+        conn.execute("UPDATE tasks SET estimated_time = 600 WHERE task_id = 'fallback_test'")
+        conn.commit()
+        conn.close()
+
+        # Get task - should fall back to estimated_time
+        task = queue.get_task("fallback_test")
+        assert task.timeout_seconds == 600
+
+    def test_get_task_default_when_both_null(self, tmp_path):
+        """get_task defaults to 900 when both timeout_seconds and estimated_time are NULL"""
+        import sqlite3
+        db_path = tmp_path / "test.db"
+
+        queue = TaskQueue(db_path=str(db_path))
+
+        # Manually insert task with NULL timeout_seconds
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("""
+            INSERT INTO tasks (task_id, description, status, created_at, updated_at, timeout_seconds)
+            VALUES ('default_test', 'Test', 'staged', '2024-01-01', '2024-01-01', NULL)
+        """)
+        conn.commit()
+        conn.close()
+
+        # Get task - should default to 900
+        task = queue.get_task("default_test")
+        assert task.timeout_seconds == 900
+
+    def test_list_tasks_fallback_to_estimated_time(self, tmp_path):
+        """list_tasks uses estimated_time when timeout_seconds is NULL"""
+        import sqlite3
+        db_path = tmp_path / "test.db"
+
+        queue = TaskQueue(db_path=str(db_path))
+
+        # Add estimated_time column
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute("ALTER TABLE tasks ADD COLUMN estimated_time INTEGER")
+        except sqlite3.OperationalError:
+            pass
+        conn.commit()
+        conn.close()
+
+        # Manually insert with estimated_time
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("""
+            INSERT INTO tasks (task_id, description, status, created_at, updated_at, timeout_seconds, estimated_time)
+            VALUES ('list_fallback', 'Test', 'staged', '2024-01-01', '2024-01-01', NULL, 450)
+        """)
+        conn.commit()
+        conn.close()
+
+        tasks = queue.list_tasks()
+        matching = [t for t in tasks if t.task_id == "list_fallback"]
+        assert len(matching) == 1
+        assert matching[0].timeout_seconds == 450
+
+    def test_list_tasks_default_when_both_null(self, tmp_path):
+        """list_tasks defaults to 900 when both timeout_seconds and estimated_time are NULL"""
+        import sqlite3
+        db_path = tmp_path / "test.db"
+
+        queue = TaskQueue(db_path=str(db_path))
+
+        # Manually insert task with NULL timeout_seconds
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("""
+            INSERT INTO tasks (task_id, description, status, created_at, updated_at, timeout_seconds)
+            VALUES ('list_default', 'Test', 'staged', '2024-01-01', '2024-01-01', NULL)
+        """)
+        conn.commit()
+        conn.close()
+
+        tasks = queue.list_tasks()
+        matching = [t for t in tasks if t.task_id == "list_default"]
+        assert len(matching) == 1
+        assert matching[0].timeout_seconds == 900
+
+
+class TestAcquireTaskExceptions:
+    """Tests for exception handling in acquire_task_for_execution"""
+
+    def test_acquire_task_rolls_back_on_exception(self, tmp_path):
+        """acquire_task_for_execution rolls back on error and re-raises"""
+        from unittest.mock import patch, MagicMock, create_autospec
+        import sqlite3
+        db_path = tmp_path / "test.db"
+        queue = TaskQueue(db_path=str(db_path))
+
+        queue.create_task(task_id="rollback_test", description="Test")
+        queue.update_status("rollback_test", TaskStatus.COMMITTED)
+
+        # Create a mock connection that wraps a real one
+        original_open = queue._open_connection
+
+        def mock_open_connection():
+            real_conn = original_open()
+            mock_conn = MagicMock(wraps=real_conn)
+            execute_call_count = [0]
+
+            def tracked_execute(sql, *args):
+                execute_call_count[0] += 1
+                # Fail on the UPDATE (4th call: BEGIN, SELECT, fetchone result, UPDATE)
+                if "UPDATE tasks" in sql:
+                    raise sqlite3.OperationalError("Simulated database error")
+                return real_conn.execute(sql, *args)
+
+            mock_conn.execute = tracked_execute
+            mock_conn.rollback = real_conn.rollback
+            mock_conn.close = real_conn.close
+            return mock_conn
+
+        with patch.object(queue, '_open_connection', mock_open_connection):
+            with pytest.raises(sqlite3.OperationalError, match="Simulated database error"):
+                queue.acquire_task_for_execution()
+
+        # Task should still be COMMITTED (transaction was rolled back)
+        task = queue.get_task("rollback_test")
+        assert task.status == TaskStatus.COMMITTED.value

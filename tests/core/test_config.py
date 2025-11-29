@@ -13,6 +13,16 @@ from nightshift.core.config import Config
 class TestDirectoryCreation:
     """Tests for automatic directory creation"""
 
+    def test_default_base_dir_is_home_nightshift(self, tmp_path, monkeypatch):
+        """Config uses ~/.nightshift as default when no base_dir provided"""
+        # Monkeypatch Path.home() to use tmp_path
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        config = Config()
+
+        assert config.base_dir == tmp_path / ".nightshift"
+        assert config.base_dir.exists()
+
     def test_creates_base_dir(self, tmp_path):
         """Config creates base directory if it doesn't exist"""
         base_dir = tmp_path / "nightshift"
@@ -197,6 +207,22 @@ class TestSlackConfig:
         assert config.slack_webhook_host == "0.0.0.0"
         assert config.slack_enable_threads is True
         assert config.slack_default_channel is None
+
+    def test_invalid_json_config_file_is_ignored(self, tmp_path):
+        """Invalid JSON config file is gracefully ignored"""
+        base_dir = tmp_path / "nightshift"
+        base_dir.mkdir()
+
+        # Create invalid JSON config file
+        config_file = base_dir / "slack_config.json"
+        config_file.write_text("{invalid json content")
+
+        # Should not raise, should fall back to defaults
+        config = Config(base_dir=str(base_dir))
+
+        # Slack should be disabled (defaults used)
+        assert config.slack_enabled is False
+        assert config.slack_webhook_port == 5000
 
 
 class TestExecutorConfig:

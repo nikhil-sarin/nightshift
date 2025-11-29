@@ -396,3 +396,311 @@ class TestKillTask:
             result = agent_manager.kill_task("task_001")
 
         assert result["success"] is True
+
+
+class TestExecuteTask:
+    """Tests for execute_task method"""
+
+    @pytest.fixture
+    def mock_process(self):
+        """Create a mock process object"""
+        process = MagicMock()
+        process.pid = 12345
+        process.returncode = None
+        # Simulate process completing after first poll
+        process.poll.side_effect = [None, 0]
+        process.stdout = MagicMock()
+        process.stderr = MagicMock()
+        process.stdout.fileno.return_value = 1
+        process.stderr.fileno.return_value = 2
+        process.stdout.readline.side_effect = ['{"type": "text", "text": "Hello"}\n', '']
+        process.stderr.readline.side_effect = ['', '']
+        process.stdout.read.return_value = ''
+        process.stderr.read.return_value = ''
+        return process
+
+    def test_execute_task_success(self, tmp_setup, mock_process):
+        """execute_task returns success for successful command"""
+        manager = AgentManager(
+            task_queue=tmp_setup["queue"],
+            logger=tmp_setup["logger"],
+            output_dir=tmp_setup["output_dir"],
+            enable_notifications=False,
+            enable_sandbox=False
+        )
+
+        # Create and commit task
+        tmp_setup["queue"].create_task(task_id="task_001", description="Test task")
+        tmp_setup["queue"].update_status("task_001", TaskStatus.COMMITTED)
+        task = tmp_setup["queue"].get_task("task_001")
+
+        with patch("subprocess.Popen", return_value=mock_process):
+            with patch("fcntl.fcntl"):
+                with patch("time.sleep"):
+                    result = manager.execute_task(task)
+
+        assert result["success"] is True
+        assert "execution_time" in result
+
+        # Task should be marked completed
+        updated_task = tmp_setup["queue"].get_task("task_001")
+        assert updated_task.status == TaskStatus.COMPLETED.value
+
+    def test_execute_task_failure(self, tmp_setup):
+        """execute_task returns failure for non-zero exit code"""
+        manager = AgentManager(
+            task_queue=tmp_setup["queue"],
+            logger=tmp_setup["logger"],
+            output_dir=tmp_setup["output_dir"],
+            enable_notifications=False,
+            enable_sandbox=False
+        )
+
+        # Create mock process that fails
+        mock_process = MagicMock()
+        mock_process.pid = 12345
+        mock_process.poll.side_effect = [None, 1]  # Non-zero exit
+        mock_process.stdout = MagicMock()
+        mock_process.stderr = MagicMock()
+        mock_process.stdout.fileno.return_value = 1
+        mock_process.stderr.fileno.return_value = 2
+        mock_process.stdout.readline.side_effect = ['', '']
+        mock_process.stderr.readline.side_effect = ['Error: command failed\n', '']
+        mock_process.stdout.read.return_value = ''
+        mock_process.stderr.read.return_value = ''
+
+        tmp_setup["queue"].create_task(task_id="task_001", description="Test")
+        tmp_setup["queue"].update_status("task_001", TaskStatus.COMMITTED)
+        task = tmp_setup["queue"].get_task("task_001")
+
+        with patch("subprocess.Popen", return_value=mock_process):
+            with patch("fcntl.fcntl"):
+                with patch("time.sleep"):
+                    result = manager.execute_task(task)
+
+        assert result["success"] is False
+        assert "error" in result
+
+        # Task should be marked failed
+        updated_task = tmp_setup["queue"].get_task("task_001")
+        assert updated_task.status == TaskStatus.FAILED.value
+
+    def test_execute_task_timeout(self, tmp_setup):
+        """execute_task handles timeout"""
+        manager = AgentManager(
+            task_queue=tmp_setup["queue"],
+            logger=tmp_setup["logger"],
+            output_dir=tmp_setup["output_dir"],
+            enable_notifications=False,
+            enable_sandbox=False
+        )
+
+        # Create mock process that never completes
+        mock_process = MagicMock()
+        mock_process.pid = 12345
+        mock_process.poll.return_value = None  # Never completes
+        mock_process.stdout = MagicMock()
+        mock_process.stderr = MagicMock()
+        mock_process.stdout.fileno.return_value = 1
+        mock_process.stderr.fileno.return_value = 2
+        mock_process.stdout.readline.return_value = ''
+        mock_process.stderr.readline.return_value = ''
+        mock_process.communicate.return_value = ('', '')
+
+        tmp_setup["queue"].create_task(task_id="task_001", description="Test")
+        tmp_setup["queue"].update_status("task_001", TaskStatus.COMMITTED)
+        task = tmp_setup["queue"].get_task("task_001")
+
+        # Mock time.time - need many calls for the loop + exception handling
+        start_time = 1000.0
+        time_values = [start_time] * 10 + [start_time + 1000] * 10  # Eventually timeout
+        with patch("subprocess.Popen", return_value=mock_process):
+            with patch("fcntl.fcntl"):
+                with patch("time.sleep"):
+                    with patch("nightshift.core.agent_manager.time.time", side_effect=time_values):
+                        result = manager.execute_task(task, timeout=1)
+
+        assert result["success"] is False
+        assert "timeout" in result["error"].lower()
+
+    def test_execute_task_exception(self, tmp_setup):
+        """execute_task handles unexpected exceptions"""
+        manager = AgentManager(
+            task_queue=tmp_setup["queue"],
+            logger=tmp_setup["logger"],
+            output_dir=tmp_setup["output_dir"],
+            enable_notifications=False,
+            enable_sandbox=False
+        )
+
+        tmp_setup["queue"].create_task(task_id="task_001", description="Test")
+        tmp_setup["queue"].update_status("task_001", TaskStatus.COMMITTED)
+        task = tmp_setup["queue"].get_task("task_001")
+
+        with patch("subprocess.Popen", side_effect=OSError("Failed to start process")):
+            result = manager.execute_task(task)
+
+        assert result["success"] is False
+        assert "error" in result
+
+        # Task should be marked failed
+        updated_task = tmp_setup["queue"].get_task("task_001")
+        assert updated_task.status == TaskStatus.FAILED.value
+
+    def test_execute_task_with_notifications(self, tmp_setup, mock_process):
+        """execute_task sends notifications when enabled"""
+        manager = AgentManager(
+            task_queue=tmp_setup["queue"],
+            logger=tmp_setup["logger"],
+            output_dir=tmp_setup["output_dir"],
+            enable_notifications=True,
+            enable_sandbox=False,
+            enable_terminal_notifications=False
+        )
+
+        tmp_setup["queue"].create_task(task_id="task_001", description="Test")
+        tmp_setup["queue"].update_status("task_001", TaskStatus.COMMITTED)
+        task = tmp_setup["queue"].get_task("task_001")
+
+        with patch("subprocess.Popen", return_value=mock_process):
+            with patch("fcntl.fcntl"):
+                with patch("time.sleep"):
+                    with patch.object(manager.notifier, "notify") as mock_notify:
+                        result = manager.execute_task(task)
+
+        assert result["success"] is True
+        mock_notify.assert_called_once()
+        # Check notification was called with success=True
+        call_kwargs = mock_notify.call_args[1]
+        assert call_kwargs["success"] is True
+
+    def test_execute_task_with_needs_git(self, tmp_setup, mock_process):
+        """execute_task loads GH_TOKEN when needs_git is True"""
+        manager = AgentManager(
+            task_queue=tmp_setup["queue"],
+            logger=tmp_setup["logger"],
+            output_dir=tmp_setup["output_dir"],
+            enable_notifications=False,
+            enable_sandbox=False
+        )
+
+        tmp_setup["queue"].create_task(
+            task_id="task_001",
+            description="Test",
+            needs_git=True
+        )
+        tmp_setup["queue"].update_status("task_001", TaskStatus.COMMITTED)
+        task = tmp_setup["queue"].get_task("task_001")
+
+        # Mock gh auth token
+        mock_gh_result = MagicMock()
+        mock_gh_result.returncode = 0
+        mock_gh_result.stdout = "ghp_testtoken123\n"
+
+        with patch("subprocess.Popen", return_value=mock_process):
+            with patch("subprocess.run", return_value=mock_gh_result) as mock_run:
+                with patch("fcntl.fcntl"):
+                    with patch("time.sleep"):
+                        result = manager.execute_task(task)
+
+        assert result["success"] is True
+        # gh auth token should have been called
+        mock_run.assert_called()
+
+    def test_execute_task_gh_token_failure(self, tmp_setup, mock_process):
+        """execute_task continues when GH_TOKEN loading fails"""
+        manager = AgentManager(
+            task_queue=tmp_setup["queue"],
+            logger=tmp_setup["logger"],
+            output_dir=tmp_setup["output_dir"],
+            enable_notifications=False,
+            enable_sandbox=False
+        )
+
+        tmp_setup["queue"].create_task(
+            task_id="task_001",
+            description="Test",
+            needs_git=True
+        )
+        tmp_setup["queue"].update_status("task_001", TaskStatus.COMMITTED)
+        task = tmp_setup["queue"].get_task("task_001")
+
+        with patch("subprocess.Popen", return_value=mock_process):
+            with patch("subprocess.run", side_effect=Exception("gh not found")):
+                with patch("fcntl.fcntl"):
+                    with patch("time.sleep"):
+                        result = manager.execute_task(task)
+
+        # Should still succeed even if gh fails
+        assert result["success"] is True
+
+
+class TestBuildCommandWithSandbox:
+    """Tests for _build_command with sandbox enabled"""
+
+    def test_build_command_with_sandbox(self, tmp_setup):
+        """_build_command wraps with sandbox when enabled"""
+        with patch("nightshift.core.sandbox.SandboxManager.is_available", return_value=True):
+            manager = AgentManager(
+                task_queue=tmp_setup["queue"],
+                logger=tmp_setup["logger"],
+                output_dir=tmp_setup["output_dir"],
+                enable_sandbox=True,
+                enable_notifications=False
+            )
+
+        task = Task(
+            task_id="test_001",
+            description="Test task",
+            status="running",
+            allowed_directories=["/tmp/test"]
+        )
+
+        cmd = manager._build_command(task)
+
+        # Should be wrapped with sandbox-exec
+        assert "sandbox-exec" in cmd
+
+    def test_build_command_read_only_sandbox(self, tmp_setup):
+        """_build_command uses read-only sandbox when no directories"""
+        with patch("nightshift.core.sandbox.SandboxManager.is_available", return_value=True):
+            manager = AgentManager(
+                task_queue=tmp_setup["queue"],
+                logger=tmp_setup["logger"],
+                output_dir=tmp_setup["output_dir"],
+                enable_sandbox=True,
+                enable_notifications=False
+            )
+
+        task = Task(
+            task_id="test_001",
+            description="Test task",
+            status="running",
+            allowed_directories=[]  # Empty
+        )
+
+        cmd = manager._build_command(task)
+
+        assert "sandbox-exec" in cmd
+
+    def test_build_command_sandbox_validation_error(self, tmp_setup):
+        """_build_command raises on sandbox validation failure"""
+        with patch("nightshift.core.sandbox.SandboxManager.is_available", return_value=True):
+            with patch("nightshift.core.sandbox.SandboxManager.validate_directories", side_effect=ValueError("Invalid path")):
+                manager = AgentManager(
+                    task_queue=tmp_setup["queue"],
+                    logger=tmp_setup["logger"],
+                    output_dir=tmp_setup["output_dir"],
+                    enable_sandbox=True,
+                    enable_notifications=False
+                )
+
+                task = Task(
+                    task_id="test_001",
+                    description="Test",
+                    status="running",
+                    allowed_directories=["/invalid/../path"]
+                )
+
+                with pytest.raises(ValueError):
+                    manager._build_command(task)

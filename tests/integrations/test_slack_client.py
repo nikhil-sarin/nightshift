@@ -248,6 +248,25 @@ class TestSlackClientRetryLogic:
             assert mock_client.chat_postMessage.call_count == 1
 
 
+class TestSlackClientGetChannelInfo:
+    """Tests for get_channel_info method"""
+
+    def test_get_channel_info_success(self):
+        """get_channel_info returns channel dict"""
+        with patch("nightshift.integrations.slack_client.WebClient") as mock_cls:
+            mock_client = MagicMock()
+            mock_client.conversations_info.return_value = MagicMock(
+                data={"ok": True, "channel": {"id": "C123", "name": "general"}}
+            )
+            mock_cls.return_value = mock_client
+
+            client = SlackClient("xoxb-test")
+            channel = client.get_channel_info("C123")
+
+            assert channel["id"] == "C123"
+            assert channel["name"] == "general"
+
+
 class TestSlackClientTestConnection:
     """Tests for test_connection method"""
 
@@ -270,3 +289,60 @@ class TestSlackClientTestConnection:
 
             client = SlackClient("xoxb-test")
             assert client.test_connection() is False
+
+
+class TestSlackClientRetryExhaustion:
+    """Tests for retry exhaustion scenarios"""
+
+    def test_retry_exhaustion_raises_last_error(self):
+        """_retry_request raises last error when all retries exhausted"""
+        with patch("nightshift.integrations.slack_client.WebClient") as mock_cls:
+            mock_client = MagicMock()
+
+            # All calls raise rate_limited
+            error_response = MagicMock()
+            error_response.get.return_value = "rate_limited"
+            error_response.headers = {"Retry-After": "1"}
+
+            mock_client.chat_postMessage.side_effect = SlackApiError(
+                "rate_limited", error_response
+            )
+            mock_cls.return_value = mock_client
+
+            with patch("time.sleep"):  # Don't actually sleep
+                client = SlackClient("xoxb-test", max_retries=3)
+
+                with pytest.raises(SlackApiError) as exc_info:
+                    client.post_message(channel="C123", text="test")
+
+                assert "rate_limited" in str(exc_info.value)
+
+            # Should have tried max_retries times
+            assert mock_client.chat_postMessage.call_count == 3
+
+    def test_retry_uses_exponential_backoff_without_retry_after(self):
+        """_retry_request uses exponential backoff when no Retry-After header"""
+        with patch("nightshift.integrations.slack_client.WebClient") as mock_cls:
+            mock_client = MagicMock()
+
+            # First two calls rate limited (no Retry-After), third succeeds
+            error_response = MagicMock()
+            error_response.get.return_value = "rate_limited"
+            error_response.headers = {}  # No Retry-After header
+
+            mock_client.chat_postMessage.side_effect = [
+                SlackApiError("rate_limited", error_response),
+                SlackApiError("rate_limited", error_response),
+                MagicMock(data={"ok": True})
+            ]
+            mock_cls.return_value = mock_client
+
+            with patch("time.sleep") as mock_sleep:
+                client = SlackClient("xoxb-test", max_retries=3)
+                response = client.post_message(channel="C123", text="test")
+
+                assert response.ok is True
+                # Exponential backoff: 2^0=1s, 2^1=2s
+                assert mock_sleep.call_count == 2
+                mock_sleep.assert_any_call(1)  # 2^0
+                mock_sleep.assert_any_call(2)  # 2^1

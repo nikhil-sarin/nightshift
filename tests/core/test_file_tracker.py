@@ -81,6 +81,22 @@ class TestSnapshots:
 
         assert "__pycache__/module.pyc" not in snapshot
 
+    def test_take_snapshot_handles_stat_errors(self, tmp_path):
+        """Snapshot gracefully handles files that can't be stat'd"""
+        # Create a valid file
+        (tmp_path / "valid.txt").write_text("content")
+
+        # Create a broken symlink (target doesn't exist)
+        broken_link = tmp_path / "broken_link"
+        broken_link.symlink_to(tmp_path / "nonexistent_target")
+
+        tracker = FileTracker(watch_dir=str(tmp_path))
+        snapshot = tracker.take_snapshot()
+
+        # Should include valid file but not crash on broken symlink
+        assert "valid.txt" in snapshot
+        assert "broken_link" not in snapshot
+
 
 class TestChangeDetection:
     """Tests for detecting file changes between snapshots"""

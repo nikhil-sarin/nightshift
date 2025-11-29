@@ -564,3 +564,273 @@ class TestExecutorManager:
         finally:
             if pid_file.exists():
                 pid_file.unlink()
+
+
+class TestTaskExecutorEdgeCases:
+    """Edge case tests for TaskExecutor"""
+
+    def test_start_with_running_executor_raises(self, tmp_setup):
+        """start raises RuntimeError when another executor is running"""
+        import os
+
+        # Create a PID file with current process PID (which is running)
+        current_pid = os.getpid()
+        pid_data = {"pid": current_pid, "max_workers": 3, "poll_interval": 1.0}
+        with open(tmp_setup["pid_file"], 'w') as f:
+            json.dump(pid_data, f)
+
+        executor = TaskExecutor(
+            task_queue=tmp_setup["queue"],
+            agent_manager=tmp_setup["agent_manager"],
+            logger=tmp_setup["logger"],
+            pid_file=tmp_setup["pid_file"]
+        )
+
+        with pytest.raises(RuntimeError) as exc_info:
+            executor.start()
+
+        assert "already running" in str(exc_info.value)
+
+    def test_start_with_invalid_pid_file(self, tmp_setup):
+        """start handles corrupted/invalid PID file"""
+        # Create invalid JSON PID file
+        with open(tmp_setup["pid_file"], 'w') as f:
+            f.write("{ not valid json")
+
+        executor = TaskExecutor(
+            task_queue=tmp_setup["queue"],
+            agent_manager=tmp_setup["agent_manager"],
+            logger=tmp_setup["logger"],
+            pid_file=tmp_setup["pid_file"]
+        )
+
+        try:
+            # Should clean up invalid file and start normally
+            executor.start()
+            assert executor.is_running is True
+        finally:
+            executor.stop()
+
+    def test_start_with_missing_pid_key(self, tmp_setup):
+        """start handles PID file with missing 'pid' key"""
+        # Create PID file without required 'pid' key
+        with open(tmp_setup["pid_file"], 'w') as f:
+            json.dump({"max_workers": 3}, f)
+
+        executor = TaskExecutor(
+            task_queue=tmp_setup["queue"],
+            agent_manager=tmp_setup["agent_manager"],
+            logger=tmp_setup["logger"],
+            pid_file=tmp_setup["pid_file"]
+        )
+
+        try:
+            # Should clean up invalid file and start normally
+            executor.start()
+            assert executor.is_running is True
+        finally:
+            executor.stop()
+
+    def test_start_write_pid_fails(self, tmp_setup):
+        """start raises exception when PID file cannot be written"""
+        # Make pid_file a directory so write fails
+        tmp_setup["pid_file"].mkdir(parents=True)
+
+        executor = TaskExecutor(
+            task_queue=tmp_setup["queue"],
+            agent_manager=tmp_setup["agent_manager"],
+            logger=tmp_setup["logger"],
+            pid_file=tmp_setup["pid_file"]
+        )
+
+        with pytest.raises(Exception):
+            executor.start()
+
+    def test_stop_remove_pid_file_fails(self, tmp_setup):
+        """stop handles PID file removal failure gracefully"""
+        executor = TaskExecutor(
+            task_queue=tmp_setup["queue"],
+            agent_manager=tmp_setup["agent_manager"],
+            logger=tmp_setup["logger"],
+            pid_file=tmp_setup["pid_file"]
+        )
+
+        executor.start()
+
+        # Replace pid_file path with directory to cause unlink to fail
+        with patch.object(executor, 'pid_file', Path("/nonexistent/path/executor.pid")):
+            # Mock exists to return True, but unlink will fail
+            with patch('pathlib.Path.exists', return_value=True):
+                with patch('pathlib.Path.unlink', side_effect=PermissionError("denied")):
+                    # Should not raise, just log error
+                    executor.stop()
+
+        assert executor.is_running is False
+
+    def test_poll_loop_handles_exception(self, tmp_setup):
+        """Poll loop continues after exception"""
+        # Make acquire_task_for_execution raise an exception
+        tmp_setup["queue"].acquire_task_for_execution = Mock(
+            side_effect=[Exception("DB error"), None, None, None]
+        )
+
+        executor = TaskExecutor(
+            task_queue=tmp_setup["queue"],
+            agent_manager=tmp_setup["agent_manager"],
+            logger=tmp_setup["logger"],
+            poll_interval=0.1,
+            pid_file=tmp_setup["pid_file"]
+        )
+
+        try:
+            executor.start()
+            # Wait for a few poll cycles
+            time.sleep(0.5)
+            # Executor should still be running despite exception
+            assert executor.is_running is True
+        finally:
+            executor.stop()
+
+    def test_wrapper_logs_task_failure(self, tmp_setup):
+        """Wrapper logs when task returns success=False"""
+        tmp_setup["queue"].create_task(task_id="task_001", description="Test")
+        tmp_setup["queue"].update_status("task_001", TaskStatus.COMMITTED)
+        tmp_setup["queue"].update_status("task_001", TaskStatus.RUNNING)
+
+        # Make execute_task return failure
+        tmp_setup["agent_manager"].execute_task.return_value = {
+            "success": False,
+            "error": "Task failed due to timeout"
+        }
+
+        executor = TaskExecutor(
+            task_queue=tmp_setup["queue"],
+            agent_manager=tmp_setup["agent_manager"],
+            logger=tmp_setup["logger"],
+            pid_file=tmp_setup["pid_file"]
+        )
+
+        # Should not raise
+        executor._execute_task_wrapper("task_001")
+
+        # Agent manager should be called
+        tmp_setup["agent_manager"].execute_task.assert_called_once()
+
+
+class TestExecutorManagerEdgeCases:
+    """Edge case tests for ExecutorManager"""
+
+    def setup_method(self):
+        """Reset singleton state before each test"""
+        ExecutorManager._instance = None
+
+    def test_get_status_reads_live_process(self, tmp_setup):
+        """get_status returns status when PID file points to live process"""
+        import os
+        pid_file = Path.home() / ".nightshift" / "executor.pid"
+        pid_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Use current process PID (which is alive)
+        pid_data = {
+            "pid": os.getpid(),
+            "max_workers": 5,
+            "poll_interval": 2.0,
+            "started_at": time.time()
+        }
+
+        try:
+            with open(pid_file, 'w') as f:
+                json.dump(pid_data, f)
+
+            status = ExecutorManager.get_status()
+
+            assert status["is_running"] is True
+            assert status["max_workers"] == 5
+            assert status["poll_interval"] == 2.0
+            assert status["pid"] == os.getpid()
+
+        finally:
+            if pid_file.exists():
+                pid_file.unlink()
+
+    def test_get_status_cleans_invalid_pid_file(self, tmp_setup):
+        """get_status cleans up corrupted PID file"""
+        pid_file = Path.home() / ".nightshift" / "executor.pid"
+        pid_file.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            # Write invalid JSON
+            with open(pid_file, 'w') as f:
+                f.write("{ invalid json")
+
+            status = ExecutorManager.get_status()
+
+            assert status["is_running"] is False
+            # File should be cleaned up
+            assert not pid_file.exists()
+
+        finally:
+            if pid_file.exists():
+                pid_file.unlink()
+
+    def test_stop_executor_signals_external_process(self, tmp_setup):
+        """stop_executor sends SIGTERM to external process"""
+        import os
+        import signal
+
+        pid_file = Path.home() / ".nightshift" / "executor.pid"
+        pid_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Use a non-existent PID
+        pid_data = {
+            "pid": 999999,
+            "max_workers": 3,
+            "poll_interval": 1.0
+        }
+
+        try:
+            with open(pid_file, 'w') as f:
+                json.dump(pid_data, f)
+
+            # Should clean up stale PID file
+            ExecutorManager.stop_executor()
+
+            # File should be cleaned up
+            assert not pid_file.exists()
+
+        finally:
+            if pid_file.exists():
+                pid_file.unlink()
+
+    def test_stop_executor_handles_sigterm_to_live_process(self, tmp_setup):
+        """stop_executor handles case where process doesn't stop gracefully"""
+        import os
+
+        pid_file = Path.home() / ".nightshift" / "executor.pid"
+        pid_file.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            # Use current process PID
+            pid_data = {
+                "pid": os.getpid(),
+                "max_workers": 3,
+                "poll_interval": 1.0
+            }
+            with open(pid_file, 'w') as f:
+                json.dump(pid_data, f)
+
+            # Mock os.kill to simulate process not stopping
+            with patch('os.kill') as mock_kill:
+                # First call (signal 0) - process exists
+                # Second call (SIGTERM) - send signal
+                # Third call (signal 0) - still exists (didn't stop)
+                mock_kill.side_effect = [None, None, None]
+
+                with pytest.raises(RuntimeError) as exc_info:
+                    ExecutorManager.stop_executor()
+
+                assert "did not stop gracefully" in str(exc_info.value)
+
+        finally:
+            if pid_file.exists():
+                pid_file.unlink()

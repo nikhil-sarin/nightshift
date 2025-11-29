@@ -277,3 +277,194 @@ class TestFormatErrorMessage:
 
         assert len(blocks[0]["text"]["text"]) < 600
         assert "..." in blocks[0]["text"]["text"]
+
+
+class TestFormatCompletionNotificationEdgeCases:
+    """Edge case tests for format_completion_notification"""
+
+    def test_long_description_truncated(self):
+        """format_completion_notification truncates long descriptions"""
+        summary = {
+            "task_id": "task_001",
+            "status": "success",
+            "description": "X" * 600,  # Over 500 chars
+            "execution_time": 30.0
+        }
+
+        blocks = SlackFormatter.format_completion_notification(summary)
+
+        # Find description block
+        desc_block = [b for b in blocks if "What you asked for" in str(b)][0]
+        assert "..." in desc_block["text"]["text"]
+        assert len(desc_block["text"]["text"]) < 600
+
+    def test_result_path_parses_stream_json(self, tmp_path):
+        """format_completion_notification parses stream-json output"""
+        # Create a mock output file with stream-json content
+        output_file = tmp_path / "task_001_output.json"
+        stream_json = {
+            "stdout": '\n'.join([
+                '{"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello "}}',
+                '{"type": "content_block_delta", "delta": {"type": "text_delta", "text": "World!"}}',
+                '{"type": "other_event", "data": "ignored"}',
+                'invalid json line'
+            ]),
+            "stderr": ""
+        }
+        output_file.write_text(json.dumps(stream_json))
+
+        summary = {
+            "task_id": "task_001",
+            "status": "success",
+            "description": "Test",
+            "execution_time": 30.0,
+            "result_path": str(output_file)
+        }
+
+        blocks = SlackFormatter.format_completion_notification(summary)
+
+        # Should have parsed and included the response
+        blocks_text = " ".join([str(b) for b in blocks])
+        assert "Hello World!" in blocks_text
+
+    def test_result_path_truncates_long_response(self, tmp_path):
+        """format_completion_notification truncates long responses"""
+        output_file = tmp_path / "task_001_output.json"
+        long_text = "X" * 1500
+        stream_json = {
+            "stdout": f'{{"type": "content_block_delta", "delta": {{"type": "text_delta", "text": "{long_text}"}}}}',
+            "stderr": ""
+        }
+        output_file.write_text(json.dumps(stream_json))
+
+        summary = {
+            "task_id": "task_001",
+            "status": "success",
+            "description": "Test",
+            "execution_time": 30.0,
+            "result_path": str(output_file)
+        }
+
+        blocks = SlackFormatter.format_completion_notification(summary)
+
+        blocks_text = " ".join([str(b) for b in blocks])
+        assert "truncated" in blocks_text.lower()
+
+    def test_result_path_handles_invalid_json(self, tmp_path):
+        """format_completion_notification handles invalid JSON gracefully"""
+        output_file = tmp_path / "task_001_output.json"
+        output_file.write_text("{ invalid json")
+
+        summary = {
+            "task_id": "task_001",
+            "status": "success",
+            "description": "Test",
+            "execution_time": 30.0,
+            "result_path": str(output_file)
+        }
+
+        # Should not raise
+        blocks = SlackFormatter.format_completion_notification(summary)
+        assert len(blocks) > 0
+
+    def test_modified_files_truncated(self):
+        """format_completion_notification truncates modified files list"""
+        summary = {
+            "task_id": "task_001",
+            "status": "success",
+            "description": "Test",
+            "execution_time": 30.0,
+            "file_changes": {
+                "created": [],
+                "modified": [f"file_{i}.py" for i in range(10)],
+                "deleted": []
+            }
+        }
+
+        blocks = SlackFormatter.format_completion_notification(summary)
+
+        blocks_text = " ".join([str(b) for b in blocks])
+        assert "Modified" in blocks_text
+        assert "more" in blocks_text
+
+    def test_deleted_files_truncated(self):
+        """format_completion_notification truncates deleted files list"""
+        summary = {
+            "task_id": "task_001",
+            "status": "success",
+            "description": "Test",
+            "execution_time": 30.0,
+            "file_changes": {
+                "created": [],
+                "modified": [],
+                "deleted": [f"file_{i}.py" for i in range(10)]
+            }
+        }
+
+        blocks = SlackFormatter.format_completion_notification(summary)
+
+        blocks_text = " ".join([str(b) for b in blocks])
+        assert "Deleted" in blocks_text
+        assert "more" in blocks_text
+
+    def test_long_error_message_truncated(self):
+        """format_completion_notification truncates long error messages"""
+        summary = {
+            "task_id": "task_001",
+            "status": "failed",
+            "description": "Test",
+            "execution_time": 10.0,
+            "error_message": "E" * 500  # Over 300 chars
+        }
+
+        blocks = SlackFormatter.format_completion_notification(summary)
+
+        error_blocks = [b for b in blocks if "Error" in str(b)]
+        assert len(error_blocks) > 0
+        # Error should be truncated
+        assert "..." in str(error_blocks[0])
+
+    def test_result_path_shown_in_context(self):
+        """format_completion_notification shows result path"""
+        summary = {
+            "task_id": "task_001",
+            "status": "success",
+            "description": "Test",
+            "execution_time": 30.0,
+            "result_path": "/path/to/output.json"
+        }
+
+        blocks = SlackFormatter.format_completion_notification(summary)
+
+        context_blocks = [b for b in blocks if b.get("type") == "context"]
+        assert len(context_blocks) > 0
+        assert "/path/to/output.json" in str(context_blocks)
+
+
+class TestFormatTaskListEdgeCases:
+    """Edge case tests for format_task_list"""
+
+    def test_long_task_description_truncated(self):
+        """format_task_list truncates long task descriptions"""
+        task = Mock()
+        task.task_id = "task_001"
+        task.status = "STAGED"
+        task.description = "D" * 200  # Over 100 chars
+
+        blocks = SlackFormatter.format_task_list([task])
+
+        task_block = blocks[1]  # After header
+        assert "..." in task_block["text"]["text"]
+        assert len(task_block["text"]["text"]) < 200
+
+    def test_unknown_status_uses_question_mark(self):
+        """format_task_list uses ? for unknown status"""
+        task = Mock()
+        task.task_id = "task_001"
+        task.status = "UNKNOWN_STATUS"
+        task.description = "Test"
+
+        blocks = SlackFormatter.format_task_list([task])
+
+        task_block = blocks[1]
+        assert "❓" in task_block["text"]["text"]
