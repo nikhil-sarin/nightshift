@@ -127,15 +127,24 @@ def cli(ctx):
     # Initialize components with config paths
     ctx.obj['logger'] = NightShiftLogger(log_dir=str(config.get_log_dir()))
     ctx.obj['task_queue'] = TaskQueue(db_path=str(config.get_database_path()))
+
+    # Determine MCP config path (use full config with all servers as base)
+    mcp_config_path = str(Path.home() / ".claude.json.with_mcp_servers")
+    if not Path(mcp_config_path).exists():
+        # Fall back to default ~/.claude.json if custom config doesn't exist
+        mcp_config_path = str(Path.home() / ".claude.json")
+
     ctx.obj['task_planner'] = TaskPlanner(
         ctx.obj['logger'],
         tools_reference_path=str(config.get_tools_reference_path()),
-        directory_map_path=str(config.get_directory_map_path())
+        directory_map_path=str(config.get_directory_map_path()),
+        mcp_config_path=mcp_config_path
     )
     ctx.obj['agent_manager'] = AgentManager(
         ctx.obj['task_queue'],
         ctx.obj['logger'],
-        output_dir=str(config.get_output_dir())
+        output_dir=str(config.get_output_dir()),
+        mcp_config_path=mcp_config_path
     )
 
 

@@ -17,6 +17,7 @@ from .logger import NightShiftLogger
 from .file_tracker import FileTracker
 from .notifier import Notifier
 from .sandbox import SandboxManager
+from .mcp_config_manager import MCPConfigManager
 
 
 class AgentManager:
@@ -30,7 +31,8 @@ class AgentManager:
         claude_bin: str = "claude",
         enable_notifications: bool = True,
         enable_sandbox: bool = True,
-        enable_terminal_notifications: bool = True
+        enable_terminal_notifications: bool = True,
+        mcp_config_path: Optional[str] = None,
     ):
         self.task_queue = task_queue
         self.logger = logger
@@ -51,6 +53,12 @@ class AgentManager:
         self.sandbox = SandboxManager() if enable_sandbox and SandboxManager.is_available() else None
         if enable_sandbox and not self.sandbox:
             self.logger.warning("Sandboxing requested but sandbox-exec not available on this system")
+
+        # MCP config manager for dynamic minimal configs
+        self.mcp_manager = MCPConfigManager(
+            base_config_path=mcp_config_path,
+            logger=logger
+        )
 
     def execute_task(
         self,
@@ -77,9 +85,12 @@ class AgentManager:
         file_tracker = FileTracker()
         file_tracker.start_tracking()
 
+        # Track MCP config for cleanup
+        mcp_config_path = None
+
         try:
             # Build Claude command (potentially wrapped with sandbox)
-            cmd = self._build_command(task)
+            cmd, mcp_config_path = self._build_command(task)
 
             # Log the exact command for debugging
             self.logger.info("=" * 80)
@@ -386,8 +397,23 @@ class AgentManager:
                 "file_changes": file_changes
             }
 
-    def _build_command(self, task: Task) -> str:
-        """Build Claude CLI command from task specification"""
+        finally:
+            # Cleanup temporary MCP config file
+            if mcp_config_path:
+                try:
+                    os.remove(mcp_config_path)
+                    self.logger.debug(f"Cleaned up MCP config: {mcp_config_path}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to cleanup MCP config {mcp_config_path}: {e}")
+
+    def _build_command(self, task: Task) -> tuple[str, Optional[str]]:
+        """
+        Build Claude CLI command from task specification.
+
+        Returns:
+            Tuple of (command_string, mcp_config_path)
+            mcp_config_path is returned for cleanup after execution
+        """
         cmd_parts = [self.claude_bin, "-p"]
 
         # Add the main prompt
@@ -397,10 +423,35 @@ class AgentManager:
         cmd_parts.append("--output-format stream-json")
         cmd_parts.append("--verbose")
 
-        # Add allowed tools if specified
+        # Generate minimal MCP config based on task's allowed_tools
+        # This is the KEY optimization - only load MCP servers we actually need!
+        mcp_config_path = None
         if task.allowed_tools:
+            mcp_config_path = self.mcp_manager.create_minimal_config(
+                required_tools=task.allowed_tools,
+                profile_name=task.task_id
+            )
+
+            # Log the optimization
+            savings = self.mcp_manager.estimate_token_savings(task.allowed_tools)
+            self.logger.info(
+                f"📊 MCP Optimization for {task.task_id}: "
+                f"Loading {savings['loaded_servers']}/{savings['total_servers']} servers "
+                f"(~{savings['estimated_tokens_saved']:,} tokens saved, "
+                f"{savings['reduction_percent']:.0f}% reduction)"
+            )
+
+            # Add MCP config to command
+            cmd_parts.append(f"--mcp-config {mcp_config_path}")
+
+            # Add allowed tools (still needed for extra safety)
             tools_str = " ".join(task.allowed_tools)
             cmd_parts.append(f"--allowed-tools {tools_str}")
+        else:
+            # No tools specified - use empty MCP config
+            mcp_config_path = self.mcp_manager.get_empty_config(profile_name=task.task_id)
+            cmd_parts.append(f"--mcp-config {mcp_config_path}")
+            self.logger.info(f"🔒 No MCP tools needed for {task.task_id}, using empty config")
 
         # Add system prompt if specified
         if task.system_prompt:
@@ -436,7 +487,7 @@ class AgentManager:
                 self.logger.error(f"Sandbox validation failed: {e}")
                 raise
 
-        return claude_cmd
+        return claude_cmd, mcp_config_path
 
     def _parse_output(self, stdout: str, stderr: str) -> Dict[str, Any]:
         """

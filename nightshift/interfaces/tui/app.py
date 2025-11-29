@@ -25,16 +25,25 @@ def create_app() -> Application:
     cfg = Config()
     logger = NightShiftLogger(log_dir=str(cfg.get_log_dir()), console_output=False)
     queue = TaskQueue(db_path=str(cfg.get_database_path()))
+
+    # Determine MCP config path
+    from pathlib import Path
+    mcp_config_path = str(Path.home() / ".claude.json.with_mcp_servers")
+    if not Path(mcp_config_path).exists():
+        mcp_config_path = str(Path.home() / ".claude.json")
+
     planner = TaskPlanner(
         logger,
         tools_reference_path=str(cfg.get_tools_reference_path()),
-        directory_map_path=str(cfg.get_directory_map_path())
+        directory_map_path=str(cfg.get_directory_map_path()),
+        mcp_config_path=mcp_config_path
     )
     agent = AgentManager(
         queue,
         logger,
         output_dir=str(cfg.get_output_dir()),
-        enable_terminal_notifications=False  # Disable terminal output in TUI mode
+        enable_terminal_notifications=False,  # Disable terminal output in TUI mode
+        mcp_config_path=mcp_config_path
     )
 
     # Initialize UI state
