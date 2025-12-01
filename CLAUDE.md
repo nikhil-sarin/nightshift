@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 NightShift is an AI-driven research automation system that uses Claude Code in headless mode to execute research tasks. It provides a staged approval workflow where a task planner agent analyzes user requests, selects appropriate MCP tools, and creates execution plans that can be reviewed before execution.
 
+The system can be controlled via CLI or Slack, with sandboxed execution on macOS for security.
+
 ## Development Commands
 
 ### Installation
@@ -14,7 +16,7 @@ pip install -e .
 pip install -e ".[dev]"  # With dev dependencies (pytest, coverage)
 ```
 
-### Running NightShift
+### Core CLI Commands
 ```bash
 # Submit task and wait for approval
 nightshift submit "task description"
@@ -115,17 +117,22 @@ tests/
 - Coverage reports uploaded to Codecov
 - Triggered on push to main and feature/* branches, and on pull requests
 
-## Architecture
+# Start the Slack webhook server
+nightshift slack-server
 
 NightShift uses a concurrent task execution architecture with three main components:
 
-1. **Task Planner Agent** (nightshift/core/task_planner.py): Analyzes user requests via `claude -p` with `--json-schema` to produce structured task plans including tool selection, enhanced prompts, and resource estimates.
+### Testing
+No formal test suite exists yet. Manual testing is done via:
+1. CLI commands listed above
+2. Slack commands in a test workspace
+3. Checking logs in `~/.nightshift/logs/`
 
 2. **Agent Manager** (nightshift/core/agent_manager.py): Executes individual tasks via `claude -p` with `--verbose --output-format stream-json`, parsing the JSON stream to extract token usage and tool calls. Spawns Claude CLI as subprocess.
 
 3. **Task Executor** (nightshift/core/task_executor.py): Background service that polls for COMMITTED tasks and executes them concurrently using a thread pool. Supports up to N concurrent Claude CLI subprocesses (default: 3).
 
-### Key Components
+NightShift uses a two-agent architecture where both agents are Claude Code instances running in headless mode via the `claude` CLI:
 
 - **TaskQueue** (nightshift/core/task_queue.py): Thread-safe SQLite-backed persistence with WAL mode enabled. Task lifecycle states: STAGED → COMMITTED → RUNNING → COMPLETED/FAILED. Supports concurrent reads/writes with `acquire_task_for_execution()` using atomic transactions.
 
@@ -133,11 +140,84 @@ NightShift uses a concurrent task execution architecture with three main compone
 
 - **ExecutorManager** (nightshift/core/task_executor.py): Singleton manager for global executor instance, ensures only one executor service runs at a time.
 
-- **FileTracker** (nightshift/core/file_tracker.py): Takes before/after snapshots of the working directory to detect created/modified files during execution
+**Responsibilities:**
+- Analyzes task description and selects appropriate MCP tools
+- Determines sandbox permissions (which directories need write access)
+- Generates enhanced prompt for executor
+- Estimates token usage and execution time
+- Sets `needs_git` flag for tasks requiring git/gh CLI access
 
-- **AgentManager** (nightshift/core/agent_manager.py): Orchestrates Claude CLI subprocess execution, parses stream-json output, and manages file tracking
+**Key Logic:**
+- Reads available tools from `nightshift/config/claude-code-tools-reference.md`
+- Uses JSON schema validation to enforce structured output
+- Parses response handling both direct JSON and markdown-wrapped format (task_planner.py:137-150)
+- Defaults to current working directory for sandbox permissions when uncertain
 
-- **TaskPlanner** (nightshift/core/task_planner.py): Uses Claude with JSON schema enforcement to select MCP tools from nightshift/config/claude-code-tools-reference.md
+### 2. Executor Agent (nightshift/core/agent_manager.py)
+Executes approved tasks with restricted tool access and optional sandboxing. Invoked as:
+```bash
+# On macOS with sandbox enabled:
+sandbox-exec -f <profile.sb> claude -p "<task>" --output-format stream-json --verbose --allowed-tools <tools> --system-prompt "<prompt>"
+
+# On Linux or sandbox disabled:
+claude -p "<task>" --output-format stream-json --verbose --allowed-tools <tools> --system-prompt "<prompt>"
+```
+
+**Responsibilities:**
+- Executes task using only allowed MCP tools
+- Runs inside sandbox (macOS) with restricted filesystem writes
+- Parses stream-json output line-by-line
+- Tracks file changes via before/after snapshots
+- Reports progress and results back to task queue
+
+**Stream-JSON Parsing:**
+- Lines with `"type": "text"` → Claude's response content
+- Lines with `"usage"` key → Token usage statistics
+- Lines with `"type": "tool_use"` → MCP tool invocations
+- Not all lines are valid JSON (some are plain text)
+
+### Core Components
+
+**TaskQueue** (nightshift/core/task_queue.py)
+- SQLite-backed persistence with task lifecycle state machine
+- Valid transitions: STAGED → COMMITTED → RUNNING → COMPLETED/FAILED
+- Also supports: PAUSED, CANCELLED states
+- Stores task metadata: description, allowed_tools, allowed_directories, needs_git, process_id
+- Database schema includes migrations for new columns
+
+**SandboxManager** (nightshift/core/sandbox.py)
+- macOS-only sandboxing using `sandbox-exec` with `.sb` profiles
+- Generates profiles that deny all writes except to allowed_directories
+- Always permits: /tmp, ~/.claude/, MCP credential files
+- When `needs_git=true`: also permits /dev/null, /dev/tty, ~/.config/gh/
+- Profiles enforce least-privilege: read-all, execute-all, network-all, write-restricted
+
+**FileTracker** (nightshift/core/file_tracker.py)
+- Takes SHA-256 hash snapshots before/after execution
+- Detects created/modified/deleted files
+- Only tracks changes within working directory (not system-wide)
+
+**Notifier** (nightshift/core/notifier.py)
+- Generates completion notifications with task summary
+- Supports terminal output and Slack notifications
+- Saves notification JSON to `~/.nightshift/notifications/`
+
+**SlackEventHandler** (nightshift/integrations/slack_handler.py)
+- Routes Slack slash commands to NightShift operations
+- Handles button interactions (Approve/Reject/Details)
+- Spawns planning/execution in background threads
+- Uses `SlackMetadataStore` to track Slack context per task
+
+**SlackClient** (nightshift/integrations/slack_client.py)
+- Wrapper around Slack SDK with DM detection
+- Formats messages using Block Kit via `SlackFormatter`
+- Handles threaded replies for async operations
+
+**SlackServer** (nightshift/integrations/slack_server.py)
+- Flask app with `/slack/commands` and `/slack/interactions` endpoints
+- HMAC-SHA256 signature verification via `slack_middleware.py`
+- Rate limiting: 100/min global, with per-user extraction
+- Caches raw request body for signature verification
 
 ### Terminal UI (TUI)
 
@@ -197,16 +277,21 @@ Both agents execute Claude via subprocess with specific configurations:
 ```bash
 claude -p "<planning_prompt>" --output-format json --json-schema <schema>
 ```
-
-**Executor:**
-```bash
-claude -p "<task_description>" --output-format stream-json --verbose --allowed-tools <tools> --system-prompt "<prompt>"
+~/.nightshift/
+├── config/
+│   └── slack_config.json          # Slack credentials (encrypted/secure)
+├── database/
+│   └── nightshift.db              # SQLite task queue
+├── logs/
+│   └── nightshift_YYYYMMDD.log    # Daily execution logs
+├── output/
+│   ├── task_XXX_output.json       # Full stream-json output
+│   └── task_XXX_files.json        # File change tracking
+├── notifications/
+│   └── task_XXX_notification.json # Completion summaries
+└── slack_metadata/
+    └── task_XXX_slack.json        # Slack context (channel, user, thread)
 ```
-
-The stream-json format is parsed line-by-line to extract:
-- Text content blocks (type: "text")
-- Token usage (key: "usage")
-- Tool calls (type: "tool_use")
 
 ## Important Implementation Details
 
