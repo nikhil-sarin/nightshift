@@ -25,12 +25,25 @@ def create_app() -> Application:
     cfg = Config()
     logger = NightShiftLogger(log_dir=str(cfg.get_log_dir()), console_output=False)
     queue = TaskQueue(db_path=str(cfg.get_database_path()))
-    planner = TaskPlanner(logger, tools_reference_path=str(cfg.get_tools_reference_path()))
+
+    # Determine MCP config path
+    from pathlib import Path
+    mcp_config_path = str(Path.home() / ".claude.json.with_mcp_servers")
+    if not Path(mcp_config_path).exists():
+        mcp_config_path = str(Path.home() / ".claude.json")
+
+    planner = TaskPlanner(
+        logger,
+        tools_reference_path=str(cfg.get_tools_reference_path()),
+        directory_map_path=str(cfg.get_directory_map_path()),
+        mcp_config_path=mcp_config_path
+    )
     agent = AgentManager(
         queue,
         logger,
         output_dir=str(cfg.get_output_dir()),
-        enable_terminal_notifications=False  # Disable terminal output in TUI mode
+        enable_terminal_notifications=False,  # Disable terminal output in TUI mode
+        mcp_config_path=mcp_config_path
     )
 
     # Initialize UI state
@@ -57,9 +70,9 @@ def create_app() -> Application:
 
     # Define style - use terminal color palette
     style = Style.from_dict({
-        "statusbar": "dim",
-        "separator": "dim",
-        "dim": "dim",
+        "statusbar": "fg:ansibrightblack",
+        "separator": "fg:ansibrightblack",
+        "dim": "fg:ansibrightblack",
         "yellow": "fg:ansiyellow",
         "orange": "fg:ansibrightred",
         "blue": "fg:ansiblue",
@@ -161,9 +174,9 @@ def create_app_for_test(tasks=None, tmp_path=None, disable_auto_refresh: bool = 
 
     # Minimal style for tests
     style = Style.from_dict({
-        "statusbar": "dim",
-        "separator": "dim",
-        "dim": "dim",
+        "statusbar": "fg:ansibrightblack",
+        "separator": "fg:ansibrightblack",
+        "dim": "fg:ansibrightblack",
         "yellow": "fg:ansiyellow",
         "orange": "fg:ansibrightred",
         "blue": "fg:ansiblue",

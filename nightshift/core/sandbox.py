@@ -58,7 +58,7 @@ class SandboxManager:
             "/private/tmp",
             "/private/var/tmp",
             str(Path(tempfile.gettempdir()).resolve()),
-            str(Path.home() / ".claude")  # Claude CLI needs to write debug logs
+            str(Path.home() / ".claude"),  # Claude CLI needs to write debug logs and session data
         ]
 
         # Specific files that need write access (not directories)
@@ -113,6 +113,19 @@ class SandboxManager:
         for file_path in sorted(allowed_files):
             profile_lines.append(f'(allow file-write* (literal "{file_path}"))')
 
+        # Keychain access (required for Claude CLI authentication)
+        profile_lines.append("")
+        profile_lines.append(";; Allow Keychain access for Claude CLI authentication")
+        profile_lines.append('(allow mach-lookup (global-name "com.apple.SecurityServer"))')
+        profile_lines.append('(allow mach-lookup (global-name "com.apple.securityd"))')
+        profile_lines.append('(allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo"))')
+        profile_lines.append('(allow mach-lookup (global-name "com.apple.CoreServices.coreservicesd"))')
+        profile_lines.append('(allow ipc-posix-shm-read-data (ipc-posix-name-regex #"^/tmp/com\\.apple\\.csseed\\."))')
+        profile_lines.append('(allow ipc-posix-shm-read* (ipc-posix-name "apple.shm.notification_center"))')
+        profile_lines.append('(allow ipc-posix-shm-read* (ipc-posix-name-regex #"^apple\\."))')
+        profile_lines.append('(allow authorization-right-obtain)')
+        profile_lines.append('(allow user-preference-read)')
+
         # Add device file access and network services if needed for git/gh
         if needs_git:
             profile_lines.append("")
@@ -122,12 +135,10 @@ class SandboxManager:
             profile_lines.append('(allow file-write* (literal "/dev/stderr"))')
             profile_lines.append('(allow file-write* (literal "/dev/dtracehelper"))')
             profile_lines.append("")
-            profile_lines.append(";; Allow network services for gh CLI (HTTPS/SSH)")
-            profile_lines.append('(allow mach-lookup (global-name "com.apple.SecurityServer"))')
+            profile_lines.append(";; Allow additional network services for gh CLI (HTTPS/SSH)")
             profile_lines.append('(allow mach-lookup (global-name "com.apple.dnssd.service"))')
             profile_lines.append('(allow mach-lookup (global-name "com.apple.trustd"))')
             profile_lines.append('(allow mach-lookup (global-name "com.apple.nsurlsessiond"))')
-            profile_lines.append('(allow ipc-posix-shm-read* (ipc-posix-name "apple.shm.notification_center"))')
 
         profile_lines.append("")
         profile_lines.append(";; Allow writes to specified directories")
