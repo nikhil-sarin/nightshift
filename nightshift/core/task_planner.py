@@ -428,14 +428,9 @@ Guidelines:
                 # If no wrapper, try parsing directly
                 refined_plan = wrapper
 
-            # Validate required fields
-            required_fields = [
-                "enhanced_prompt",
-                "allowed_tools",
-                "allowed_directories",
-                "needs_git",
-                "system_prompt",
-            ]
+            # Validate required fields (must match JSON schema)
+            required_fields = ["enhanced_prompt", "allowed_tools", "allowed_directories",
+                             "needs_git", "system_prompt", "estimated_tokens"]
             for field in required_fields:
                 if field not in refined_plan:
                     raise Exception(f"Refined plan missing field: {field}")
