@@ -28,8 +28,7 @@ class TaskPlanner:
 
         # Initialize MCP config manager for dynamic config generation
         self.mcp_manager = MCPConfigManager(
-            base_config_path=mcp_config_path,
-            logger=logger
+            base_config_path=mcp_config_path, logger=logger
         )
 
         # Default to package's config directory
@@ -257,7 +256,7 @@ Guidelines:
             self.logger.debug(f"Tools selected: {', '.join(plan['allowed_tools'])}")
 
             # Log estimated token savings
-            savings = self.mcp_manager.estimate_token_savings(plan['allowed_tools'])
+            savings = self.mcp_manager.estimate_token_savings(plan["allowed_tools"])
             self.logger.info(
                 f"Token optimization: Loading {savings['loaded_servers']}/{savings['total_servers']} "
                 f"MCP servers (est. {savings['estimated_tokens_saved']:,} tokens saved, "
@@ -285,6 +284,7 @@ Guidelines:
             if empty_mcp_config:
                 try:
                     import os
+
                     os.remove(empty_mcp_config)
                 except:
                     pass  # Ignore cleanup errors
@@ -379,7 +379,9 @@ Guidelines:
             )
 
             # Create empty MCP config for plan refinement
-            empty_mcp_config = self.mcp_manager.get_empty_config(profile_name="refine_planner")
+            empty_mcp_config = self.mcp_manager.get_empty_config(
+                profile_name="refine_planner"
+            )
 
             cmd = [
                 self.claude_bin,
@@ -464,6 +466,7 @@ Guidelines:
             if empty_mcp_config:
                 try:
                     import os
+
                     os.remove(empty_mcp_config)
                 except:
                     pass  # Ignore cleanup errors
