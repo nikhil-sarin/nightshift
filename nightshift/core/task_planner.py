@@ -2,12 +2,14 @@
 Task Planner - Uses Claude to analyze task descriptions and plan execution
 Determines which tools are needed and generates appropriate prompts
 """
+
 import subprocess
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from .logger import NightShiftLogger
+from .mcp_config_manager import MCPConfigManager
 
 
 class TaskPlanner:
@@ -17,26 +19,53 @@ class TaskPlanner:
         self,
         logger: NightShiftLogger,
         tools_reference_path: Optional[str] = None,
-        claude_bin: str = "claude"
+        directory_map_path: Optional[str] = None,
+        claude_bin: str = "claude",
+        mcp_config_path: Optional[str] = None,
     ):
         self.logger = logger
         self.claude_bin = claude_bin
+
+        # Initialize MCP config manager for dynamic config generation
+        self.mcp_manager = MCPConfigManager(
+            base_config_path=mcp_config_path, logger=logger
+        )
 
         # Default to package's config directory
         if tools_reference_path is None:
             # Get the directory where this module is installed
             package_dir = Path(__file__).parent.parent
-            tools_reference_path = package_dir / "config" / "claude-code-tools-reference.md"
+            tools_reference_path = (
+                package_dir / "config" / "claude-code-tools-reference.md"
+            )
+
+        if directory_map_path is None:
+            package_dir = Path(__file__).parent.parent
+            directory_map_path = package_dir / "config" / "directory-map.md"
 
         self.tools_reference_path = Path(tools_reference_path)
+        self.directory_map_path = Path(directory_map_path)
 
-        # Load tools reference
+        # Load tools reference (optional)
         if self.tools_reference_path.exists():
             with open(self.tools_reference_path) as f:
                 self.tools_reference = f.read()
         else:
-            self.logger.warning(f"Tools reference not found at {self.tools_reference_path}")
+            self.logger.warning(
+                f"Tools reference not found at {self.tools_reference_path}"
+            )
             self.tools_reference = ""
+
+        # Load directory map (optional)
+        if self.directory_map_path.exists():
+            with open(self.directory_map_path) as f:
+                self.directory_map = f.read()
+            self.logger.info(f"Loaded directory map from {self.directory_map_path}")
+        else:
+            self.logger.info(
+                f"Directory map not found at {self.directory_map_path} (this is optional)"
+            )
+            self.directory_map = ""
 
     def plan_task(self, description: str, timeout: int = 120) -> Dict[str, Any]:
         """
@@ -52,7 +81,6 @@ class TaskPlanner:
                 - allowed_tools: List of tool names needed
                 - system_prompt: System prompt for the executor
                 - estimated_tokens: Rough token estimate
-                - estimated_time: Rough time estimate in seconds
                 - reasoning: Why these tools were chosen
         """
 
@@ -74,6 +102,8 @@ CURRENT WORKING DIRECTORY:
 AVAILABLE TOOLS:
 {self.tools_reference}
 
+{self._format_directory_map_section()}
+
 Respond with ONLY a JSON object (no other text) with this structure:
 {{
     "enhanced_prompt": "The full detailed prompt for the executor agent",
@@ -81,8 +111,6 @@ Respond with ONLY a JSON object (no other text) with this structure:
     "allowed_directories": ["/absolute/path/to/dir1", "/absolute/path/to/dir2"],
     "needs_git": false,
     "system_prompt": "System prompt for the executor",
-    "estimated_tokens": 1000,
-    "estimated_time": 60,
     "reasoning": "Brief explanation of tool choices and directory permissions"
 }}
 
@@ -90,8 +118,6 @@ Guidelines:
 - Be specific about which tools are needed
 - Include file operations tools (Write, Read) if outputs need to be saved
 - For arxiv tasks, include mcp__arxiv__download and either mcp__gemini__ask or mcp__claude__ask for summarization
-- Estimated time: simple tasks 30s, paper analysis 60s, data analysis 120s
-- Estimated tokens: add ~2000 for paper tasks, ~1000 for data tasks, ~500 base
 
 **NEEDS_GIT FLAG (CRITICAL):**
 - Set needs_git to true if the task involves ANY of these:
@@ -116,8 +142,8 @@ Guidelines:
 
 **SYSTEM PROMPT - Working Directory (CRITICAL):**
 - The system_prompt MUST instruct the executor to work within allowed_directories, NOT /tmp
-- Include this directive: "IMPORTANT: Do all work in the current working directory or specified output paths. Do NOT use /tmp for task outputs unless specifically required for temporary intermediate files."
-- The executor should save all final outputs to the working directory or explicitly specified paths
+- Include this directive: "IMPORTANT: Do all work in the specified allowed paths. Do NOT use /tmp for task outputs unless specifically required for temporary intermediate files."
+- The executor should save all final outputs to the explicitly specified allowed paths
 
 **SYSTEM PROMPT - Git Commit Attribution (CRITICAL):**
 - When creating git commits, ALWAYS end the commit message with:
@@ -126,41 +152,59 @@ Guidelines:
 - NEVER use "Claude" or "Claude Code" in commit attribution - use "NightShift" instead
 """
 
+        # Generate empty MCP config for planner (planner doesn't need MCP tools)
+        empty_mcp_config = None
         try:
             # Call Claude in headless mode for planning
             # Use --json-schema to enforce structured output
-            json_schema = json.dumps({
-                "type": "object",
-                "properties": {
-                    "enhanced_prompt": {"type": "string"},
-                    "allowed_tools": {"type": "array", "items": {"type": "string"}},
-                    "allowed_directories": {"type": "array", "items": {"type": "string"}},
-                    "needs_git": {"type": "boolean"},
-                    "system_prompt": {"type": "string"},
-                    "estimated_tokens": {"type": "integer"},
-                    "estimated_time": {"type": "integer"},
-                    "reasoning": {"type": "string"}
-                },
-                "required": ["enhanced_prompt", "allowed_tools", "allowed_directories", "needs_git", "system_prompt", "estimated_tokens", "estimated_time"]
-            })
+            json_schema = json.dumps(
+                {
+                    "type": "object",
+                    "properties": {
+                        "enhanced_prompt": {"type": "string"},
+                        "allowed_tools": {"type": "array", "items": {"type": "string"}},
+                        "allowed_directories": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "needs_git": {"type": "boolean"},
+                        "system_prompt": {"type": "string"},
+                        "reasoning": {"type": "string"},
+                    },
+                    "required": [
+                        "enhanced_prompt",
+                        "allowed_tools",
+                        "allowed_directories",
+                        "needs_git",
+                        "system_prompt",
+                    ],
+                }
+            )
+
+            # Create empty MCP config for planner (huge token savings!)
+            empty_mcp_config = self.mcp_manager.get_empty_config(profile_name="planner")
+            self.logger.info(f"Using empty MCP config for planner: {empty_mcp_config}")
 
             cmd = [
                 self.claude_bin,
                 "-p",
                 planning_prompt,
-                "--output-format", "json",
-                "--json-schema", json_schema
+                "--output-format",
+                "json",
+                "--json-schema",
+                json_schema,
+                "--mcp-config",
+                empty_mcp_config,
             ]
 
             result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout
+                cmd, capture_output=True, text=True, timeout=timeout
             )
 
             if result.returncode != 0:
-                self.logger.error(f"Planning command failed with return code {result.returncode}")
+                self.logger.error(
+                    f"Planning command failed with return code {result.returncode}"
+                )
                 self.logger.error(f"STDERR: {result.stderr}")
                 self.logger.error(f"STDOUT: {result.stdout}")
                 raise Exception(f"Planning failed: {result.stderr}")
@@ -197,14 +241,27 @@ Guidelines:
                 plan = wrapper
 
             # Validate required fields
-            required_fields = ["enhanced_prompt", "allowed_tools", "allowed_directories",
-                             "needs_git", "system_prompt", "estimated_tokens", "estimated_time"]
+            required_fields = [
+                "enhanced_prompt",
+                "allowed_tools",
+                "allowed_directories",
+                "needs_git",
+                "system_prompt",
+            ]
             for field in required_fields:
                 if field not in plan:
                     raise Exception(f"Planning response missing field: {field}")
 
             self.logger.debug(f"Task plan created: {plan.get('reasoning', 'N/A')}")
             self.logger.debug(f"Tools selected: {', '.join(plan['allowed_tools'])}")
+
+            # Log estimated token savings
+            savings = self.mcp_manager.estimate_token_savings(plan["allowed_tools"])
+            self.logger.info(
+                f"Token optimization: Loading {savings['loaded_servers']}/{savings['total_servers']} "
+                f"MCP servers (est. {savings['estimated_tokens_saved']:,} tokens saved, "
+                f"{savings['reduction_percent']:.1f}% reduction)"
+            )
 
             return plan
 
@@ -222,7 +279,19 @@ Guidelines:
             self.logger.error(f"Task planning failed: {str(e)}")
             raise
 
-    def refine_plan(self, current_plan: Dict[str, Any], feedback: str) -> Dict[str, Any]:
+        finally:
+            # Cleanup temporary MCP config
+            if empty_mcp_config:
+                try:
+                    import os
+
+                    os.remove(empty_mcp_config)
+                except:
+                    pass  # Ignore cleanup errors
+
+    def refine_plan(
+        self, current_plan: Dict[str, Any], feedback: str
+    ) -> Dict[str, Any]:
         """
         Refine an existing plan based on user feedback
 
@@ -244,7 +313,6 @@ Allowed Tools: {', '.join(current_plan.get('allowed_tools', []))}
 Allowed Directories: {', '.join(current_plan.get('allowed_directories', []))}
 System Prompt: {current_plan.get('system_prompt', 'N/A')}
 Estimated Tokens: {current_plan.get('estimated_tokens', 0)}
-Estimated Time: {current_plan.get('estimated_time', 0)}s
 
 USER FEEDBACK:
 {feedback}
@@ -255,6 +323,8 @@ CURRENT WORKING DIRECTORY:
 AVAILABLE TOOLS:
 {self.tools_reference}
 
+{self._format_directory_map_section()}
+
 Based on the user's feedback, create a REVISED plan. Respond with ONLY a JSON object (no other text) with this structure:
 {{
     "enhanced_prompt": "The revised detailed prompt for the executor agent",
@@ -263,7 +333,6 @@ Based on the user's feedback, create a REVISED plan. Respond with ONLY a JSON ob
     "needs_git": false,
     "system_prompt": "Revised system prompt for the executor",
     "estimated_tokens": 1000,
-    "estimated_time": 60,
     "reasoning": "Brief explanation of how the feedback was incorporated"
 }}
 
@@ -271,49 +340,67 @@ Guidelines:
 - Address the specific concerns raised in the user feedback
 - Maintain the overall task objectives unless feedback suggests otherwise
 - Adjust tool selection if the user requests different capabilities
-- Update estimates based on scope changes
+- Update token estimates based on scope changes
 - Explain what changed in the reasoning field
 - **NEEDS_GIT**: Set needs_git=true for git operations OR 'gh' CLI usage (GitHub issues, PRs, etc.)
 - **SECURITY**: Only allow write access to minimum required directories (use absolute paths)
-- **SYSTEM PROMPT**: Instruct executor to work in allowed_directories, NOT /tmp. Include: "IMPORTANT: Do all work in the current working directory or specified output paths. Do NOT use /tmp for task outputs unless specifically required for temporary intermediate files."
+- **SYSTEM PROMPT**: Instruct executor to work in allowed_directories, NOT /tmp. Include: "IMPORTANT: Do all work in the specified allowed directories. Do NOT use /tmp for task outputs unless specifically required for temporary intermediate files."
 - **GIT COMMITS**: For git commits, end with "🌙 Generated by NightShift (https://github.com/james-alvey-42/nightshift)" and use relevant emoji prefix (🐛 bugs, ✨ features, etc.). NEVER use "Claude"
 """
 
+        # Generate empty MCP config for refinement (also doesn't need MCP tools)
+        empty_mcp_config = None
         try:
             # Call Claude in headless mode for plan refinement
-            json_schema = json.dumps({
-                "type": "object",
-                "properties": {
-                    "enhanced_prompt": {"type": "string"},
-                    "allowed_tools": {"type": "array", "items": {"type": "string"}},
-                    "allowed_directories": {"type": "array", "items": {"type": "string"}},
-                    "needs_git": {"type": "boolean"},
-                    "system_prompt": {"type": "string"},
-                    "estimated_tokens": {"type": "integer"},
-                    "estimated_time": {"type": "integer"},
-                    "reasoning": {"type": "string"}
-                },
-                "required": ["enhanced_prompt", "allowed_tools", "allowed_directories", "needs_git", "system_prompt",
-                             "estimated_tokens", "estimated_time"]
-            })
+            json_schema = json.dumps(
+                {
+                    "type": "object",
+                    "properties": {
+                        "enhanced_prompt": {"type": "string"},
+                        "allowed_tools": {"type": "array", "items": {"type": "string"}},
+                        "allowed_directories": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "needs_git": {"type": "boolean"},
+                        "system_prompt": {"type": "string"},
+                        "estimated_tokens": {"type": "integer"},
+                        "reasoning": {"type": "string"},
+                    },
+                    "required": [
+                        "enhanced_prompt",
+                        "allowed_tools",
+                        "allowed_directories",
+                        "needs_git",
+                        "system_prompt",
+                        "estimated_tokens",
+                    ],
+                }
+            )
+
+            # Create empty MCP config for plan refinement
+            empty_mcp_config = self.mcp_manager.get_empty_config(
+                profile_name="refine_planner"
+            )
 
             cmd = [
                 self.claude_bin,
                 "-p",
                 refinement_prompt,
-                "--output-format", "json",
-                "--json-schema", json_schema
+                "--output-format",
+                "json",
+                "--json-schema",
+                json_schema,
+                "--mcp-config",
+                empty_mcp_config,
             ]
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
             if result.returncode != 0:
-                self.logger.error(f"Plan refinement failed with return code {result.returncode}")
+                self.logger.error(
+                    f"Plan refinement failed with return code {result.returncode}"
+                )
                 self.logger.error(f"STDERR: {result.stderr}")
                 raise Exception(f"Plan refinement failed: {result.stderr}")
 
@@ -341,15 +428,17 @@ Guidelines:
                 # If no wrapper, try parsing directly
                 refined_plan = wrapper
 
-            # Validate required fields
+            # Validate required fields (must match JSON schema)
             required_fields = ["enhanced_prompt", "allowed_tools", "allowed_directories",
-                             "needs_git", "system_prompt", "estimated_tokens", "estimated_time"]
+                             "needs_git", "system_prompt", "estimated_tokens"]
             for field in required_fields:
                 if field not in refined_plan:
                     raise Exception(f"Refined plan missing field: {field}")
 
             self.logger.debug(f"Plan refined: {refined_plan.get('reasoning', 'N/A')}")
-            self.logger.debug(f"Tools adjusted to: {', '.join(refined_plan['allowed_tools'])}")
+            self.logger.debug(
+                f"Tools adjusted to: {', '.join(refined_plan['allowed_tools'])}"
+            )
 
             return refined_plan
 
@@ -367,6 +456,16 @@ Guidelines:
             self.logger.error(f"Plan refinement failed: {str(e)}")
             raise
 
+        finally:
+            # Cleanup temporary MCP config
+            if empty_mcp_config:
+                try:
+                    import os
+
+                    os.remove(empty_mcp_config)
+                except:
+                    pass  # Ignore cleanup errors
+
     def quick_estimate(self, description: str) -> Dict[str, int]:
         """
         Fallback quick estimation without calling Claude
@@ -378,15 +477,29 @@ Guidelines:
         if any(word in desc_lower for word in ["arxiv", "paper", "article"]):
             return {
                 "estimated_tokens": 2500,
-                "estimated_time": 300  # 5 minutes for paper tasks
+                "estimated_time": 300,  # 5 minutes for paper tasks
             }
         elif any(word in desc_lower for word in ["csv", "data", "analyze", "plot"]):
             return {
                 "estimated_tokens": 1500,
-                "estimated_time": 300  # 5 minutes for data analysis
+                "estimated_time": 300,  # 5 minutes for data analysis
             }
         else:
-            return {
-                "estimated_tokens": 500,
-                "estimated_time": 120  # 2 minutes default
-            }
+            return {"estimated_tokens": 500, "estimated_time": 120}  # 2 minutes default
+
+    def _format_directory_map_section(self) -> str:
+        """
+        Format the directory map section for the planning prompt.
+        Returns empty string if no directory map is available.
+        """
+        if not self.directory_map:
+            return ""
+
+        return f"""DIRECTORY STRUCTURE MAP:
+{self.directory_map}
+
+When determining allowed_directories, you can use this map to:
+- Resolve directory paths by number (e.g., "40.47" for a specific project)
+- Find related directories for multi-aspect projects (software, notes, papers, data)
+- Identify appropriate locations for task outputs
+- Understand the user's file organization structure"""

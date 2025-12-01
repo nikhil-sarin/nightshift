@@ -7,13 +7,15 @@
 **Automated Research Assistant System**
 
 [![Status](https://img.shields.io/badge/status-Phase%201%20Complete-success)](https://github.com)
-[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Tests](https://github.com/james-alvey-42/nightshift/actions/workflows/test.yml/badge.svg)](https://github.com/james-alvey-42/nightshift/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/james-alvey-42/nightshift/branch/main/graph/badge.svg)](https://codecov.io/gh/james-alvey-42/nightshift)
 [![Slack](https://img.shields.io/badge/Slack-Integration-purple)](SLACK_QUICK_START.md)
 
 *An AI-driven agent manager for scientific research automation, powered by Claude Code's headless mode and MCP tools. Now with Slack integration!*
 
-[Features](#features) • [Installation](#installation) • [Usage](#usage) • [Slack](#slack-integration) • [Examples](#example-workflows)
+[Features](#features) • [Installation](#installation) • [Usage](#usage) • [TUI](#terminal-ui-tui) • [Slack](#slack-integration) • [Examples](#example-workflows)
 
 </div>
 
@@ -62,7 +64,14 @@ nightshift/
 │   ├── slack_metadata.py        # Task metadata persistence
 │   └── slack_middleware.py      # Request verification
 ├── interfaces/                  # User interfaces
-│   └── cli.py                   # Command-line interface
+│   ├── cli.py                   # Command-line interface
+│   └── tui/                     # Interactive terminal UI
+│       ├── app.py               # Application factory
+│       ├── controllers.py       # Business logic layer
+│       ├── widgets.py           # Custom prompt_toolkit controls
+│       ├── keybindings.py       # Keyboard shortcuts
+│       ├── layout.py            # UI layout composition
+│       └── models.py            # Data structures
 └── config/                      # Configuration files
     └── claude-code-tools-reference.md  # MCP tools reference
 ```
@@ -120,6 +129,9 @@ All NightShift data is stored in `~/.nightshift/`:
 - 💻 **CLI Interface**
   Simple commands for task management
 
+- 🖥️ **Interactive TUI**
+  Full-featured terminal UI with vim-like navigation
+
 - 💾 **Persistent Storage**
   SQLite database, centralized data directory
 
@@ -131,6 +143,15 @@ All NightShift data is stored in `~/.nightshift/`:
 
 - 📱 **Slack Integration** ⭐ **NEW!**
   Submit tasks, approve via buttons, get completion notifications
+
+- 🔀 **Concurrent Task Execution** ⭐ **NEW!**
+  Execute multiple tasks simultaneously with configurable worker pool
+
+- ⏱️ **Configurable Timeouts**
+  Set execution time limits per task (default: 15 minutes)
+
+- 🔐 **Cross-Process Control**
+  Manage executor service from any terminal
 
 </td>
 <td width="50%">
@@ -182,6 +203,7 @@ pip install -e .
 
 This installs all required dependencies including:
 - Claude Code CLI (via Claude Agent SDK)
+- prompt-toolkit (for interactive TUI)
 - Slack SDK (for Slack integration)
 - Flask (for webhook server)
 - Rich (for beautiful terminal output)
@@ -288,6 +310,119 @@ nightshift clear
 # Skip confirmation
 nightshift clear --confirm
 ```
+</details>
+
+<details>
+<summary><b>⌨️ Shell Autocomplete (NEW!)</b></summary>
+
+```bash
+# Auto-detect shell and install completion
+nightshift completion --install
+
+# Show instructions for specific shell
+nightshift completion --shell zsh
+nightshift completion --shell bash
+nightshift completion --shell fish
+
+# Reload your shell
+source ~/.zshrc  # or ~/.bashrc for bash
+```
+
+**What gets autocompleted:**
+- ✅ Commands: `nightshift sub<TAB>` → `nightshift submit`
+- ✅ Subcommands: `nightshift executor st<TAB>` → `nightshift executor start`
+- ✅ Options: `nightshift queue --st<TAB>` → `nightshift queue --status`
+- ✅ Status values: `nightshift queue --status <TAB>` → shows all status options
+- ✅ **Task IDs (dynamic)**: `nightshift approve task_<TAB>` → shows all staged tasks
+- ✅ Context-aware task filtering:
+  - `approve` and `revise` → only STAGED tasks
+  - `cancel` → only STAGED or COMMITTED tasks
+  - `pause`, `resume`, `kill` → only RUNNING or PAUSED tasks
+  - `results`, `display`, `watch` → all tasks
+
+**Supported shells:** Bash (4.4+), Zsh, Fish, PowerShell
+
+This significantly improves CLI usability by reducing typos and helping discover available commands!
+</details>
+
+<details>
+<summary><b>🔀 Concurrent Execution (NEW!)</b></summary>
+
+```bash
+# Start executor service (processes tasks in background)
+nightshift executor start
+
+# Start with custom settings
+nightshift executor start --workers 5 --poll-interval 2.0
+
+# Check executor status
+nightshift executor status
+
+# Stop executor service
+nightshift executor stop
+
+# Submit task with custom timeout (default: 900s / 15 minutes)
+nightshift submit "Download paper" --timeout 300
+
+# Submit and execute synchronously (wait for completion)
+nightshift submit "Quick task" --auto-approve --sync
+```
+
+**How it works:**
+- Executor polls the queue for `COMMITTED` tasks and executes them concurrently
+- Configure max workers (default: 3) and poll interval (default: 1.0s)
+- Each task has a configurable timeout to prevent runaway executions
+- Tasks can be submitted from multiple terminals/Slack simultaneously
+- Executor can be controlled from any terminal using PID file tracking
+
+**Benefits:**
+- ⚡ Multiple tasks execute in parallel
+- 🔄 Submit tasks while others are running
+- 🎯 No blocking - submit and move on
+- 🛡️ Timeouts prevent hanging tasks
+
+</details>
+
+---
+
+## Terminal UI (TUI)
+
+NightShift includes a full-featured interactive terminal interface for task management.
+
+<details>
+<summary><b>🖥️ Launch the TUI</b></summary>
+
+```bash
+nightshift tui
+```
+
+<img src="docs/images/tui-screenshot.png" alt="NightShift TUI" width="800"/>
+
+</details>
+
+<details>
+<summary><b>⌨️ Keybindings</b></summary>
+
+| Key | Action |
+|-----|--------|
+| `j` / `↓` | Move down in task list |
+| `k` / `↑` | Move up in task list |
+| `Enter` / `a` | Approve selected task |
+| `r` | Reject/cancel task |
+| `e` | Review/edit task plan (opens $EDITOR) |
+| `d` | Delete task |
+| `Tab` | Cycle detail tabs (overview/execution/files/summary) |
+| `:` | Enter command mode |
+| `q` | Quit |
+
+**Command mode (`:`):**
+- `:queue [status]` - Filter tasks by status
+- `:submit <description>` - Submit new task
+- `:submit! <description>` - Submit and auto-approve
+- `:refresh` - Refresh task list
+- `:help` - Show available commands
+- `:quit` - Exit TUI
+
 </details>
 
 ---
@@ -605,8 +740,12 @@ $ nightshift approve task_9b4e2c1a
 - 🎯 Task planner uses `claude -p` with `--json-schema` to ensure structured output
 - ⚙️ Executor uses `claude -p` with `--verbose --output-format stream-json`
 - 📸 File tracking takes snapshots before/after execution
-- ⏱️ No timeout by default during development (can be added later)
+- ⏱️ Configurable timeouts per task (default: 900s / 15 minutes)
 - 🔌 All Claude calls are subprocess executions (no SDK)
+- 🔀 ThreadPoolExecutor for concurrent task execution (not ProcessPoolExecutor, since Claude CLI already spawns subprocesses)
+- 🗄️ SQLite WAL mode for concurrent database access
+- 🔒 Atomic task acquisition with `BEGIN IMMEDIATE` to prevent race conditions
+- 📝 PID file tracking for cross-process executor control
 
 ### Slack Integration
 - 🔐 HMAC-SHA256 signature verification for all webhook requests

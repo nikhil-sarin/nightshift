@@ -13,6 +13,7 @@ The system can be controlled via CLI or Slack, with sandboxed execution on macOS
 ### Installation
 ```bash
 pip install -e .
+pip install -e ".[dev]"  # With dev dependencies (pytest, coverage)
 ```
 
 ### Core CLI Commands
@@ -20,54 +21,106 @@ pip install -e .
 # Submit task and wait for approval
 nightshift submit "task description"
 
-# Auto-approve and execute immediately
+# Auto-approve and queue for execution (async, new default)
 nightshift submit "task description" --auto-approve
 
-# Submit with additional allowed directories for sandbox
-nightshift submit "task description" --allow-dir /path/to/dir
+# Auto-approve and execute synchronously (wait for completion)
+nightshift submit "task description" --auto-approve --sync
 
 # View task queue
 nightshift queue
 nightshift queue --status staged
+nightshift queue --status running
 
-# Approve and execute a task
+# Approve and queue a task for execution
 nightshift approve task_XXXXXXXX
 
-# Revise a staged task plan with feedback
-nightshift revise task_XXXXXXXX "use Claude instead of Gemini"
+# Approve and execute synchronously
+nightshift approve task_XXXXXXXX --sync
 
-# View task results (basic info)
-nightshift results task_XXXXXXXX
-
-# View task results (with full output JSON)
+# View task results
 nightshift results task_XXXXXXXX --show-output
 
-# View execution session (human-readable display)
+# View execution session in human-readable format
 nightshift display task_XXXXXXXX
+# Watch task execution in real-time
+nightshift watch task_XXXXXXXX
 
-# Process control
-nightshift pause task_XXXXXXXX
-nightshift resume task_XXXXXXXX
-nightshift kill task_XXXXXXXX
+# Cancel a task
 nightshift cancel task_XXXXXXXX
+
+# Task executor management
+nightshift executor start              # Start background executor service
+nightshift executor status             # View executor status
+nightshift executor stop               # Stop executor service
 
 # Clear all data (with confirmation)
 nightshift clear
+
+# Launch interactive TUI
+nightshift tui
 ```
 
-### Slack Integration Commands
+### Testing
+
 ```bash
-# Configure Slack credentials
-nightshift slack-setup
+# Run all tests
+pytest
+
+# Run only TUI tests
+pytest tests/tui/
+
+# Run specific test file
+pytest tests/tui/test_controller_exec_log.py
+
+# Run with verbose output
+pytest -v
+
+# Run with coverage
+pytest --cov=nightshift --cov-report=term-missing
+
+# Run with coverage and generate HTML report
+pytest --cov=nightshift --cov-report=html
+
+# Open HTML coverage report (generated in htmlcov/)
+open htmlcov/index.html  # macOS
+xdg-open htmlcov/index.html  # Linux
+```
+
+**Test Suite Structure:**
+```
+tests/
+├── conftest.py                        # Shared fixtures for all tests
+└── tui/                              # TUI-specific tests
+    ├── test_app_integration.py       # Integration tests
+    ├── test_controller_exec_log.py   # Controller exec log tests
+    ├── test_controller_files_summary.py  # File tracking tests
+    ├── test_exec_log_formatting.py   # Formatting helpers
+    ├── test_widgets_detail.py        # DetailControl tests
+    ├── test_widgets_task_list.py     # TaskListControl tests
+    └── test_task_deletion.py         # Task deletion tests
+```
+
+**Testing Strategy (3-Layer Approach):**
+1. **Controller Unit Tests**: Controller logic with mocked backends
+2. **Widget Rendering Tests**: Widget output verification
+3. **Integration Tests**: Keybindings and UI wiring via prompt_toolkit
+
+**Test Doubles:**
+- Located in `nightshift/interfaces/tui/testing_doubles.py`
+- Shared mocks: DummyQueue, DummyConfig, DummyPlanner, DummyAgent, DummyLogger
+- Use `create_app_for_test()` in `app.py` to create test applications
+
+**CI/CD:**
+- GitHub Actions workflow in `.github/workflows/test.yml`
+- Tests run on Python 3.10, 3.11, 3.12, 3.13
+- Coverage reports uploaded to Codecov
+- Triggered on push to main and feature/* branches, and on pull requests
 
 # Start the Slack webhook server
 nightshift slack-server
 
-# Then use slash commands in Slack:
-# /nightshift submit "task description"
-# /nightshift queue
-# /nightshift status task_XXXXXXXX
-```
+NightShift uses a concurrent task execution architecture with three main components:
 
 ### Testing
 No formal test suite exists yet. Manual testing is done via:
@@ -75,15 +128,17 @@ No formal test suite exists yet. Manual testing is done via:
 2. Slack commands in a test workspace
 3. Checking logs in `~/.nightshift/logs/`
 
-## Architecture
+2. **Agent Manager** (nightshift/core/agent_manager.py): Executes individual tasks via `claude -p` with `--verbose --output-format stream-json`, parsing the JSON stream to extract token usage and tool calls. Spawns Claude CLI as subprocess.
+
+3. **Task Executor** (nightshift/core/task_executor.py): Background service that polls for COMMITTED tasks and executes them concurrently using a thread pool. Supports up to N concurrent Claude CLI subprocesses (default: 3).
 
 NightShift uses a two-agent architecture where both agents are Claude Code instances running in headless mode via the `claude` CLI:
 
-### 1. Task Planner Agent (nightshift/core/task_planner.py)
-Analyzes user requests to produce structured execution plans. Invoked as:
-```bash
-claude -p "<planning_prompt>" --output-format json --json-schema <schema>
-```
+- **TaskQueue** (nightshift/core/task_queue.py): Thread-safe SQLite-backed persistence with WAL mode enabled. Task lifecycle states: STAGED → COMMITTED → RUNNING → COMPLETED/FAILED. Supports concurrent reads/writes with `acquire_task_for_execution()` using atomic transactions.
+
+- **TaskExecutor** (nightshift/core/task_executor.py): Manages concurrent task execution using ThreadPoolExecutor. Polls TaskQueue for COMMITTED tasks and submits them to worker threads. Each worker spawns an AgentManager subprocess.
+
+- **ExecutorManager** (nightshift/core/task_executor.py): Singleton manager for global executor instance, ensures only one executor service runs at a time.
 
 **Responsibilities:**
 - Analyzes task description and selects appropriate MCP tools
@@ -164,9 +219,63 @@ claude -p "<task>" --output-format stream-json --verbose --allowed-tools <tools>
 - Rate limiting: 100/min global, with per-user extraction
 - Caches raw request body for signature verification
 
+### Terminal UI (TUI)
+
+The TUI (nightshift/interfaces/tui/) uses prompt_toolkit and follows a clear separation of concerns:
+
+- **app.py**: Application factory, creates and wires components
+- **models.py**: Data structures (UIState, TaskRow, SelectedTaskState)
+- **controllers.py**: Business logic layer (`TUIController` class)
+- **widgets.py**: Custom prompt_toolkit controls (TaskListControl, DetailControl)
+- **keybindings.py**: Keyboard shortcut definitions
+- **layout.py**: UI layout composition
+
+**TUI Keybindings:**
+- `j/k` or arrows: Navigate task list
+- `Enter` or `a`: Approve selected task
+- `r`: Reject/cancel task
+- `e`: Review/edit task plan (opens $EDITOR)
+- `d`: Delete task
+- `Tab`: Cycle detail tabs (overview/execution/files/summary)
+- `:`: Enter command mode
+- `q`: Quit
+### Concurrent Execution
+
+**Default Behavior (Async):**
+- `nightshift submit --auto-approve` → Task moves to COMMITTED state → Executor picks it up asynchronously
+- `nightshift approve task_id` → Task moves to COMMITTED state → Executor picks it up asynchronously
+- Multiple tasks can be submitted and queued simultaneously
+- Executor polls every 1s (configurable) for new COMMITTED tasks
+- Up to 3 tasks (configurable) execute concurrently
+
+**Synchronous Mode (Legacy):**
+- `nightshift submit --auto-approve --sync` → Blocks until task completes
+- `nightshift approve task_id --sync` → Blocks until task completes
+- Useful for scripts that need to wait for results
+
+**Configuration:**
+- `NIGHTSHIFT_MAX_WORKERS`: Max concurrent tasks (default: 3)
+- `NIGHTSHIFT_POLL_INTERVAL`: Polling interval in seconds (default: 1.0)
+- `NIGHTSHIFT_AUTO_EXECUTOR`: Auto-start executor with Slack server (default: true)
+
 ### Data Storage
 
 All data lives in `~/.nightshift/`:
+- `database/nightshift.db` - SQLite task queue
+- `logs/nightshift_YYYYMMDD.log` - Execution logs
+- `output/task_XXX_output.json` - Task results and Claude output
+- `output/task_XXX_files.json` - File change tracking
+- `notifications/task_XXX_notification.json` - Completion summaries
+- `config/slack_config.json` - Slack credentials (for Slack integration)
+- `slack_metadata/task_XXX_slack.json` - Slack context (channel, user, thread)
+
+### Claude CLI Integration
+
+Both agents execute Claude via subprocess with specific configurations:
+
+**Task Planner:**
+```bash
+claude -p "<planning_prompt>" --output-format json --json-schema <schema>
 ```
 ~/.nightshift/
 ├── config/
@@ -186,72 +295,29 @@ All data lives in `~/.nightshift/`:
 
 ## Important Implementation Details
 
-### Claude CLI Execution
-- **NOT using Claude Agent SDK** - All Claude interactions are via subprocess calls to `claude` CLI binary
-- No timeouts by default during development (can be added via `timeout` parameter to `execute_task`)
-- Environment variables: GH_TOKEN loaded from `gh auth token` when `needs_git=true` for sandbox compatibility
-
-### Task Planner
-- Uses `--json-schema` flag to enforce structured output from Claude
-- Response parsing handles both direct JSON and markdown code fence wrappers (task_planner.py:137-150)
-- Tool selection based on `nightshift/config/claude-code-tools-reference.md`
-- Planning timeout default: 120 seconds (configurable via `--planning-timeout`)
-
-### Executor
-- Uses `--allowed-tools` to restrict MCP tool access to planner-approved list
-- Stream-json output parsed line-by-line (not all lines are valid JSON - some are plain text)
-- Process ID stored in task record for pause/resume/kill operations
-- Stdout/stderr captured and saved to output JSON
-
-### Sandboxing (macOS only)
-- `SandboxManager.is_available()` checks for `sandbox-exec` availability
-- Sandbox profiles are temporary files cleaned up after execution
-- When sandboxing fails (permission issues), falls back to unsandboxed execution with warning
-- Sandbox violations appear as "Operation not permitted" errors in output
-
-### File Tracking
-- Snapshots taken before/after execution using SHA-256 hashes
-- Only tracks changes within current working directory (not system-wide)
-- Three categories: created, modified, deleted
-- Results saved to `task_XXX_files.json`
-
-### Slack Integration
-- Signature verification uses cached raw request body (before Flask parsing)
-- Timestamp window: 5 minutes (prevents replay attacks)
-- Planning/execution spawned in background threads to avoid 3-second timeout
-- DM channels detected and handled differently (use user_id instead of channel_id)
-- Metadata persistence links Slack context to task_id
-
-### Git Operations
-- Tasks with `needs_git=true` get additional sandbox permissions:
-  - `/dev/null` and `/dev/tty` (required by gh CLI)
-  - `~/.config/gh/` (gh CLI token cache)
-  - `~/.gitconfig` (git configuration)
-- GH_TOKEN environment variable loaded from `gh auth token` for API access
-- Commit messages should end with: "🌙 Generated by NightShift (https://github.com/james-alvey-42/nightshift)"
+- **Thread-safety**: TaskQueue uses SQLite WAL mode and atomic transactions for concurrent access
+- **Concurrent execution**: TaskExecutor uses ThreadPoolExecutor (not ProcessPoolExecutor) because AgentManager already spawns Claude CLI as separate processes
+- **Task acquisition**: `acquire_task_for_execution()` uses `BEGIN IMMEDIATE` to atomically claim COMMITTED tasks
+- No timeouts are used during development (can be added via `timeout` parameter in `execute_task`)
+- Task planner response parsing handles both direct JSON and wrapper format with markdown code fences
+- File tracking uses hash-based comparison (SHA-256) to detect modifications
+- All Claude interactions are subprocess executions, not SDK calls
+- The system does NOT use the Claude Agent SDK - it shells out to the `claude` CLI binary
+- Tool selection relies on the MCP tools reference document in nightshift/config/claude-code-tools-reference.md
 
 ## Common Pitfalls
 
-### Task Planner Issues
-- Task planner may wrap JSON in markdown code fences - parser handles this at task_planner.py:137-150
-- If planning times out, increase `--planning-timeout` (default 120s)
-- Planning prompt includes current working directory for absolute path resolution
-
-### Executor Issues
-- Stream-json output must be parsed line-by-line; not all lines are valid JSON
-- Tool calls may fail if tool name not in `allowed_tools` list
-- File tracking only detects changes in working directory (files in /tmp or other locations won't be tracked)
-
-### State Machine
-- Task status transitions must follow valid state machine:
-  - STAGED → COMMITTED → RUNNING → COMPLETED/FAILED
-  - RUNNING ↔ PAUSED (bidirectional)
-  - Any state → CANCELLED
-- Attempting invalid transition will raise error
-
-### Sandbox Issues
-- Sandbox only works on macOS with `sandbox-exec` installed
-- Write operations outside `allowed_directories` will fail with "Operation not permitted"
-- If task needs to write to additional directories, use `--allow-dir` flag or revise plan
-- Git operations require `needs_git=true` or will fail with device access errors
-- MCP credential files automatically permitted (see sandbox.py:66-70)
+- Task planner expects structured JSON output but Claude may wrap it in markdown code fences - the parser handles this in task_planner.py
+- Stream-json output must be parsed line-by-line; not all lines are valid JSON (some are plain text)
+- File tracking snapshots are taken before/after execution, so files modified outside the working directory won't be detected
+- Task status transitions must follow the valid state machine: STAGED → COMMITTED → RUNNING → COMPLETED/FAILED/CANCELLED
+- TUI auto-refreshes every 2 seconds - disable with `create_app_for_test(disable_auto_refresh=True)` when testing
+- The `format_exec_log_from_result()` function in controllers.py parses stream-json events; understand its structure before modifying
+- **Concurrent execution requires executor**: By default, `--auto-approve` and `approve` now queue tasks for async execution. You must run `nightshift executor start` or use `--sync` flag for immediate execution
+- **Database locks**: If you see "database is locked" errors, check that WAL mode is enabled (`PRAGMA journal_mode` should return "wal")
+- **Executor not running**: If tasks stay in COMMITTED state, the executor service may not be running. Check with `nightshift executor status`
+- Task planner expects structured JSON output but Claude may wrap it in markdown code fences - the parser handles this in task_planner.py:137-150
+- Stream-json output must be parsed line-by-line; not all lines are valid JSON (some are plain text)
+- File tracking snapshots are taken before/after execution, so files modified outside the working directory won't be detected
+- Task status transitions must follow the valid state machine: STAGED → COMMITTED → RUNNING → COMPLETED/FAILED
+- **Slack server auto-starts executor**: By default, `nightshift slack-server` starts the executor service automatically. Use `--no-executor` to disable.

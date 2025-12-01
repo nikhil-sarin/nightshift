@@ -54,8 +54,19 @@ logs/
 database/
 notifications/
 
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+
 # Documentation artifacts
 nightshift-ideas.pdf
 arxiv_*.md
 claude-example-call.txt
 claude-options.txt
+
+# User-specific directory maps (not shipped with package)
+nightshift/config/directory-map.md
+nightshift/config/directory_map_jimdex.py
