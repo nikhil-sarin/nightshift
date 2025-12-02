@@ -40,9 +40,10 @@ class SandboxManager:
         - Denies ALL filesystem writes
         - Re-allows writes only to specified directories
         - Always allows writes to /tmp and /private/tmp for temp files
-        - Optionally allows device files (/dev/null, /dev/tty) if needs_git is True
-        - Optionally allows ~/.config/gh/ for gh CLI token management if needs_git is True
-        - Optionally allows macOS Keychain access for gh CLI authentication if needs_git is True
+        - Always allows writes to /dev/null, /dev/stdout, /dev/stderr (needed by MCP servers)
+        - Optionally allows additional network services for gh CLI if needs_git is True
+        - Always allows ~/.config/gh/ for gh CLI token management if needs_git is True
+        - Always allows macOS Keychain access for Claude CLI authentication
         """
         # Resolve all paths to absolute
         resolved_dirs = []
@@ -126,14 +127,16 @@ class SandboxManager:
         profile_lines.append('(allow authorization-right-obtain)')
         profile_lines.append('(allow user-preference-read)')
 
-        # Add device file access and network services if needed for git/gh
+        # Always allow standard device files (needed by MCP servers and git)
+        profile_lines.append("")
+        profile_lines.append(";; Allow standard device files for subprocess/logging")
+        profile_lines.append('(allow file-write* (literal "/dev/null"))')
+        profile_lines.append('(allow file-write* (literal "/dev/stdout"))')
+        profile_lines.append('(allow file-write* (literal "/dev/stderr"))')
+        profile_lines.append('(allow file-write* (literal "/dev/dtracehelper"))')
+
+        # Add additional network services if needed for git/gh
         if needs_git:
-            profile_lines.append("")
-            profile_lines.append(";; Allow device files needed for git/gh operations")
-            profile_lines.append('(allow file-write* (literal "/dev/null"))')
-            profile_lines.append('(allow file-write* (literal "/dev/stdout"))')
-            profile_lines.append('(allow file-write* (literal "/dev/stderr"))')
-            profile_lines.append('(allow file-write* (literal "/dev/dtracehelper"))')
             profile_lines.append("")
             profile_lines.append(";; Allow additional network services for gh CLI (HTTPS/SSH)")
             profile_lines.append('(allow mach-lookup (global-name "com.apple.dnssd.service"))')
