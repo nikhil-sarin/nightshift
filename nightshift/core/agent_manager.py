@@ -159,6 +159,14 @@ class AgentManager:
                 except Exception as e:
                     self.logger.warning(f"Could not load GH_TOKEN: {e}")
 
+            # Pass through MCP server API keys to sandboxed environment
+            # Note: We don't pass ANTHROPIC_API_KEY as it interferes with Claude authentication
+            mcp_api_keys = ["GEMINI_API_KEY", "OPENAI_API_KEY"]
+            for key in mcp_api_keys:
+                if key in os.environ:
+                    env[key] = os.environ[key]
+                    self.logger.info(f"Passing {key} to sandboxed environment")
+
             # Create output file path immediately
             output_file = self.output_dir / f"{task.task_id}_output.json"
 
